@@ -253,7 +253,7 @@ private struct AnimationSettings: View {
     var body: some View {
         Form {
             Section("움직임") {
-                Picker("스타일", selection: $model.draft.animation.style) {
+                Picker("스타일", selection: $model.draft.motion.style) {
                     Text("스프링 (직접 조절)").tag("spring")
                     Text("통통 튀게").tag("bouncy")
                     Text("부드럽게").tag("smooth")
@@ -265,8 +265,8 @@ private struct AnimationSettings: View {
             }
 
             Section("효과") {
-                Toggle("나타날 때 블러 효과", isOn: $model.draft.animation.blurTransitions)
-                Toggle("이벤트가 들어올 때 살짝 튀어오르기", isOn: $model.draft.animation.popOnEvent)
+                Toggle("나타날 때 블러 효과", isOn: $model.draft.motion.blurTransitions)
+                Toggle("이벤트가 들어올 때 살짝 튀어오르기", isOn: $model.draft.motion.popOnEvent)
             }
 
             Section {
@@ -278,17 +278,17 @@ private struct AnimationSettings: View {
         .formStyle(.grouped)
     }
 
-    private var style: String { model.draft.animation.style }
+    private var style: String { model.draft.motion.style }
 
     @ViewBuilder private var timingRows: some View {
         if style == "spring" {
-            SliderRow(title: "응답 시간", value: $model.draft.animation.response,
+            SliderRow(title: "응답 시간", value: $model.draft.motion.response,
                       range: 0.15...1.2, step: 0.01, unit: "s", decimals: 2)
-            SliderRow(title: "감쇠 (낮을수록 튐)", value: $model.draft.animation.dampingFraction,
+            SliderRow(title: "감쇠 (낮을수록 튐)", value: $model.draft.motion.dampingFraction,
                       range: 0.3...1.0, step: 0.01, unit: "", decimals: 2)
         }
         if style != "spring" && style != "none" {
-            SliderRow(title: "재생 시간", value: $model.draft.animation.durationMs,
+            SliderRow(title: "재생 시간", value: $model.draft.motion.durationMs,
                       range: 100...1200, step: 10, unit: "ms")
         }
     }

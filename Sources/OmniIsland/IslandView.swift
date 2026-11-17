@@ -76,12 +76,12 @@ struct IslandView: View {
             radius: isHidden ? 0 : 14, x: 0, y: 6
         )
         .opacity(isHidden && model.hiddenStyleFades ? 0 : 1)
-        .modifier(PopEffect(trigger: model.config.animation.popOnEvent ? model.eventSerial : 0))
+        .modifier(PopEffect(trigger: model.config.motion.popOnEvent ? model.eventSerial : 0))
         .foregroundStyle(Color(hex: a.textColor, fallback: .white))
     }
 
     private var fade: AnyTransition {
-        let blur = model.config.animation.blurTransitions
+        let blur = model.config.motion.blurTransitions
         return .asymmetric(
             insertion: AnyTransition.modifier(
                 active: BlurFade(radius: blur ? 6 : 0, opacity: 0, scale: 0.92),

@@ -12,7 +12,8 @@ struct IslandConfig: Equatable {
     var trigger = Trigger()
     var behavior = Behavior()
     var appearance = Appearance()
-    var animation = AnimationConfig()
+    // JSON key "animation"; named `motion` in Swift because `Binding.animation(_:)` would shadow it.
+    var motion = AnimationConfig()
 
     struct Trigger: Equatable {
         /// option | leftOption | rightOption | command | leftCommand | rightCommand |
@@ -150,12 +151,12 @@ extension IslandConfig {
         c.appearance.showEventProgress = a.bool("showEventProgress", c.appearance.showEventProgress)
 
         let n = r.sub("animation")
-        c.animation.style = n.string("style", c.animation.style)
-        c.animation.response = n.number("response", c.animation.response)
-        c.animation.dampingFraction = n.number("dampingFraction", c.animation.dampingFraction)
-        c.animation.durationMs = n.number("durationMs", c.animation.durationMs)
-        c.animation.blurTransitions = n.bool("blurTransitions", c.animation.blurTransitions)
-        c.animation.popOnEvent = n.bool("popOnEvent", c.animation.popOnEvent)
+        c.motion.style = n.string("style", c.motion.style)
+        c.motion.response = n.number("response", c.motion.response)
+        c.motion.dampingFraction = n.number("dampingFraction", c.motion.dampingFraction)
+        c.motion.durationMs = n.number("durationMs", c.motion.durationMs)
+        c.motion.blurTransitions = n.bool("blurTransitions", c.motion.blurTransitions)
+        c.motion.popOnEvent = n.bool("popOnEvent", c.motion.popOnEvent)
 
         return c
     }
@@ -213,7 +214,7 @@ extension IslandConfig {
             return text
         }
         func b(_ v: Bool) -> String { v ? "true" : "false" }
-        let t = trigger, be = behavior, a = appearance, an = animation
+        let t = trigger, be = behavior, a = appearance, an = motion
 
         return """
         // OmniIsland 설정 파일 (JSON5: 주석과 끝 쉼표를 쓸 수 있습니다)

@@ -165,7 +165,7 @@ final class IslandModel: ObservableObject {
     }
 
     var swiftUIAnimation: Animation? {
-        let n = config.animation
+        let n = config.motion
         let d = max(n.durationMs, 1) / 1000
         switch n.style.lowercased() {
         case "none": return nil
