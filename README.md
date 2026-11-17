@@ -24,7 +24,7 @@ brew install --cask omni-island     # /Applications/OmniIsland.app
 brew upgrade --cask omni-island     # 새 버전이 나오면 같은 자리에 덮어씁니다
 ```
 
-- 이 저장소의 `Casks/omni-island.rb`가 cask 정의입니다. `v0.2.0`처럼 `v`로 시작하는 태그를 푸시하면 GitHub Actions가 릴리스를 만들고, cask의 버전과 해시도 `main`에 자동으로 갱신합니다. 그래서 `brew upgrade`만 하면 새 버전을 받을 수 있습니다.
+- 이 저장소의 `Casks/omni-island.rb`가 cask 정의입니다. `v0.2.0`처럼 `v`로 시작하는 태그를 푸시하거나, Actions 탭에서 Build 워크플로를 수동으로 실행하면서 `release` 칸에 `0.2.0`처럼 버전을 적으면 GitHub Actions가 태그와 릴리스를 만들고, cask의 버전과 해시도 `main`에 자동으로 갱신합니다. 그래서 `brew upgrade`만 하면 새 버전을 받을 수 있습니다.
 - 앱은 Apple 공증을 받지 않았으므로, cask가 설치 직후 격리 속성(`com.apple.quarantine`)을 지우고 앱을 실행합니다.
 - 앱 버전은 태그에서, 빌드 번호는 커밋 수에서 정해집니다. 메뉴 막대 메뉴 맨 위에서 확인할 수 있습니다.
 
