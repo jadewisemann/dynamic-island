@@ -16,41 +16,57 @@ OmniWM 내장 워크스페이스 바와 달리 macOS의 "동작 줄이기"나 Om
 - OmniWM, 그리고 OmniWM 메뉴 막대 메뉴에서 켠 **Enable IPC**
 - `omniwmctl` (OmniWM 메뉴의 **Install CLI to PATH**로 설치하거나, 앱 안의 `OmniWM.app/Contents/MacOS/omniwmctl`을 그대로 사용합니다)
 
-## 빌드와 실행
+## 설치와 업데이트 (Homebrew)
+
+```bash
+brew tap jadewisemann/dynamic-island https://github.com/jadewisemann/dynamic-island
+brew install --cask omni-island     # /Applications/OmniIsland.app
+brew upgrade --cask omni-island     # 새 버전이 나오면 같은 자리에 덮어씁니다
+```
+
+- 이 저장소의 `Casks/omni-island.rb`가 cask 정의입니다. `v0.2.0`처럼 `v`로 시작하는 태그를 푸시하면 GitHub Actions가 릴리스를 만들고, cask의 버전과 해시도 `main`에 자동으로 갱신합니다. 그래서 `brew upgrade`만 하면 새 버전을 받을 수 있습니다.
+- 앱은 Apple 공증을 받지 않았으므로, cask가 설치 직후 격리 속성(`com.apple.quarantine`)을 지우고 앱을 실행합니다.
+- 앱 버전은 태그에서, 빌드 번호는 커밋 수에서 정해집니다. 메뉴 막대 메뉴 맨 위에서 확인할 수 있습니다.
+
+### 권한이 매번 초기화되지 않게 하기 (한 번만 설정)
+
+macOS는 손쉬운 사용 권한을 앱의 **서명**에 묶어서 기억합니다. 서명이 빌드마다 달라지면(ad-hoc 서명) 업데이트할 때마다 권한을 다시 줘야 합니다. 모든 빌드를 같은 인증서로 서명하면 권한이 그대로 유지됩니다.
+
+Mac에서 한 번만 실행합니다.
+
+```bash
+brew install gh && gh auth login     # 이미 로그인되어 있으면 건너뜁니다
+scripts/create-signing-cert.sh
+```
+
+이 스크립트는 다음 일을 합니다.
+
+1. 자체 서명 코드 서명 인증서 "OmniIsland Signing"을 만듭니다 (유효 기간 20년).
+2. 로그인 키체인에 넣어서, 로컬의 `scripts/bundle.sh`도 같은 인증서로 서명하게 합니다.
+3. GitHub Actions 비밀 값 `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`를 저장합니다. `gh`가 없으면 직접 넣을 값을 출력합니다.
+4. 백업을 `~/.omni-island-signing`에 남깁니다. 이 폴더는 비공개로 보관하세요.
+
+설정 후 처음 설치할 때 권한을 한 번 더 허용하면, 그 뒤로는 업데이트해도 다시 묻지 않습니다. 비밀 값이 없으면 CI는 일회용 인증서로 서명하고 경고를 남깁니다.
+
+## 소스에서 빌드하기
 
 ```bash
 git clone https://github.com/jadewisemann/dynamic-island.git
 cd dynamic-island
 
-# 1) OmniWM 없이 애니메이션만 먼저 확인하기 (가짜 워크스페이스 5개)
+# OmniWM 없이 애니메이션만 먼저 확인하기 (가짜 워크스페이스 5개)
 swift run OmniIsland --demo
-#    메뉴 막대의 캡슐 아이콘 → "애니메이션 미리보기"(⌘P)를 누를 때마다
-#    워크스페이스 전환과 창 이동이 번갈아 재생됩니다.
 
-# 2) 앱 번들로 만들어 설치하고 실행하기
-scripts/bundle.sh --install      # ~/Applications/OmniIsland.app
+# 앱 번들로 만들어 /Applications에 설치하고 실행하기
+scripts/bundle.sh --install
 ```
 
-### GitHub Actions 빌드 받아 쓰기
-
-`.github/workflows/build.yml`이 PR과 `main` 푸시마다 macOS 러너에서 빌드하고, `OmniIsland.zip`을 Actions 실행 결과의 아티팩트로 올립니다. `v0.1.0`처럼 `v`로 시작하는 태그를 푸시하면 같은 zip을 GitHub Release에도 첨부합니다.
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0   # 릴리스 만들기
-```
-
-내려받은 앱은 ad-hoc 서명만 되어 있으므로, 압축을 푼 뒤 격리 속성을 지워야 실행됩니다.
-
-```bash
-xattr -dr com.apple.quarantine OmniIsland.app
-mv OmniIsland.app ~/Applications/ && open ~/Applications/OmniIsland.app
-```
+`bundle.sh`는 키체인에 "OmniIsland Signing" 인증서가 있으면 그것으로 서명하고, 없으면 ad-hoc으로 서명합니다.
 
 처음 실행하면 **손쉬운 사용(Accessibility)** 권한을 요청합니다. 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 OmniIsland를 켜 주세요.
 
-- 권한이 없어도 동작은 합니다. 이 경우 Option 키 상태를 초당 40회 읽는 방식으로 대신 감지하고, 권한이 허용되면 자동으로 이벤트 기반 감지로 바뀝니다.
-- `bundle.sh`는 기본적으로 ad-hoc 서명을 하므로, 다시 빌드하면 macOS가 권한을 다시 물어볼 수 있습니다. 개발자 인증서가 있다면 `OMNI_ISLAND_SIGN_IDENTITY="Apple Development: ..." scripts/bundle.sh --install`처럼 서명하면 권한이 유지됩니다.
-- 로그인할 때 자동으로 실행하려면 시스템 설정 → 일반 → 로그인 항목에 `~/Applications/OmniIsland.app`을 추가합니다.
+- 권한이 없어도 동작은 합니다. 이 경우 Option 키 상태를 초당 40회 읽는 방식으로 대신 감지하고, 권한이 허용되면 자동으로 이벤트 기반 감지로 바뀝니다. 알림 배지는 권한이 있어야 보입니다.
+- 로그인할 때 자동으로 실행하려면 시스템 설정 → 일반 → 로그인 항목에 `/Applications/OmniIsland.app`을 추가합니다.
 
 Xcode에서 작업하고 싶다면 `open Package.swift`로 열면 됩니다.
 

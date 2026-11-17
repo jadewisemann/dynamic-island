@@ -140,6 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image?.isTemplate = true
 
         let menu = NSMenu()
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "dev"
+        let build = info?["CFBundleVersion"] as? String
+        let versionItem = NSMenuItem(
+            title: "OmniIsland \(version)" + (build.map { " (\($0))" } ?? ""),
+            action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
         let status = NSMenuItem(title: isDemo ? "데모 모드" : client.status.label, action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
