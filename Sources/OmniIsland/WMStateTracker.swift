@@ -67,6 +67,11 @@ final class WMStateTracker {
     private(set) var activeWorkspace: WorkspaceRef?
     private(set) var focusedApp: AppRef?
     private(set) var focusedTitle: String?
+    /// Id of the focused window, from the `focus` channel. The windows-changed
+    /// snapshot is not re-sent when only focus moves, so its `isFocused`
+    /// flags go stale; this id is what decides which icon is highlighted.
+    private(set) var focusedWindowId: String?
+    private var hasFocusInfo = false
 
     /// window id → workspace it was last seen on.
     private var windowWorkspace: [String: WorkspaceRef] = [:]
@@ -85,6 +90,16 @@ final class WMStateTracker {
         hasWindowBaseline = false
         activeByDisplay.removeAll()
         hasActiveBaseline = false
+        focusedWindowId = nil
+        hasFocusInfo = false
+    }
+
+    /// Whether this window is the focused one, preferring the live `focus`
+    /// channel over the (possibly stale) flag in the windows snapshot.
+    func isFocused(_ window: WindowSnapshot) -> Bool {
+        guard hasFocusInfo else { return window.isFocused == true }
+        guard let id = window.id, let focusedWindowId else { return false }
+        return id == focusedWindowId
     }
 
     func handle(_ message: OmniWMMessage) {
@@ -99,6 +114,8 @@ final class WMStateTracker {
         case .focus(let p):
             focusedApp = p.window?.app ?? focusedApp
             focusedTitle = p.window?.title
+            focusedWindowId = p.window?.id
+            hasFocusInfo = true
             onStateChange?()
         case .windows(let p):
             handleWindows(p.windows ?? [])
@@ -150,11 +167,11 @@ final class WMStateTracker {
             var apps = result[wsKey] ?? []
             if let index = apps.firstIndex(where: { $0.id == appKey }) {
                 apps[index].windowCount += 1
-                if window.isFocused == true { apps[index].isFocused = true }
+                if isFocused(window) { apps[index].isFocused = true }
             } else {
                 apps.append(WorkspaceApp(
                     id: appKey, name: name, bundleId: bundleId,
-                    windowCount: 1, isFocused: window.isFocused == true
+                    windowCount: 1, isFocused: isFocused(window)
                 ))
             }
             result[wsKey] = apps
@@ -179,7 +196,7 @@ final class WMStateTracker {
             let entry = WorkspaceApp(
                 id: appKey + "#" + (window.id ?? String(ordinal)),
                 name: name, bundleId: bundleId,
-                windowCount: 1, isFocused: window.isFocused == true
+                windowCount: 1, isFocused: isFocused(window)
             )
             var list = result[wsKey] ?? []
             if let last = list.lastIndex(where: { $0.bundleId == bundleId && $0.name == name }) {
@@ -261,6 +278,10 @@ final class WMStateTracker {
         if let focused = windows.first(where: { $0.isFocused == true }) {
             focusedApp = focused.app ?? focusedApp
             focusedTitle = focused.title
+            if let id = focused.id {
+                focusedWindowId = id
+                hasFocusInfo = true
+            }
         }
         onStateChange?()
     }

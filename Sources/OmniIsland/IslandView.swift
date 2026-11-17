@@ -220,8 +220,16 @@ private struct WorkspaceGroup: View {
                 .fixedSize()
                 .padding(.trailing, shown.isEmpty ? 0 : 2)
             ForEach(shown) { app in
+                let highlighted = a.highlightFocusedWindow && app.isFocused
                 AppIconView(app: app.appRef, size: iconSize)
                     .opacity(isActive || app.isFocused ? 1 : 0.8)
+                    .background {
+                        if highlighted {
+                            FocusRing(iconSize: iconSize,
+                                      color: Color(hex: a.accentColor, fallback: .blue))
+                                .matchedGeometryEffect(id: "focused-window", in: ns)
+                        }
+                    }
                     .overlay(alignment: .bottom) {
                         if model.multiWindowStyle == .dots && app.windowCount > 1 {
                             WindowCountDots(count: app.windowCount, iconSize: iconSize)
@@ -252,6 +260,25 @@ private struct WorkspaceGroup: View {
                             inactiveFill: Color.white.opacity(isEmpty ? 0 : 0.06))
         }
         .scaleEffect(isTarget ? 1.06 : 1)
+    }
+}
+
+/// Accent ring behind the focused window's icon. Shares a geometry id across
+/// workspaces so it slides to the newly focused icon.
+private struct FocusRing: View {
+    let iconSize: CGFloat
+    let color: Color
+
+    var body: some View {
+        let pad: CGFloat = 2  // stays inside the gap between icons
+        RoundedRectangle(cornerRadius: (iconSize + pad * 2) * 0.28, style: .continuous)
+            .fill(color.opacity(0.28))
+            .overlay(
+                RoundedRectangle(cornerRadius: (iconSize + pad * 2) * 0.28, style: .continuous)
+                    .stroke(color, lineWidth: 1.5)
+            )
+            .padding(-pad)
+            .shadow(color: color.opacity(0.5), radius: 4)
     }
 }
 
