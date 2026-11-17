@@ -261,15 +261,7 @@ private struct AnimationSettings: View {
                     Text("가속·감속").tag("easeInOut")
                     Text("애니메이션 없음").tag("none")
                 }
-                if model.draft.animation.style == "spring" {
-                    SliderRow(title: "응답 시간", value: $model.draft.animation.response,
-                              range: 0.15...1.2, step: 0.01, unit: "s", decimals: 2)
-                    SliderRow(title: "감쇠 (낮을수록 튐)", value: $model.draft.animation.dampingFraction,
-                              range: 0.3...1, step: 0.01, decimals: 2)
-                } else if model.draft.animation.style != "none" {
-                    SliderRow(title: "재생 시간", value: $model.draft.animation.durationMs,
-                              range: 100...1200, step: 10, unit: "ms")
-                }
+                timingRows
             }
 
             Section("효과") {
@@ -284,6 +276,21 @@ private struct AnimationSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var style: String { model.draft.animation.style }
+
+    @ViewBuilder private var timingRows: some View {
+        if style == "spring" {
+            SliderRow(title: "응답 시간", value: $model.draft.animation.response,
+                      range: 0.15...1.2, step: 0.01, unit: "s", decimals: 2)
+            SliderRow(title: "감쇠 (낮을수록 튐)", value: $model.draft.animation.dampingFraction,
+                      range: 0.3...1.0, step: 0.01, unit: "", decimals: 2)
+        }
+        if style != "spring" && style != "none" {
+            SliderRow(title: "재생 시간", value: $model.draft.animation.durationMs,
+                      range: 100...1200, step: 10, unit: "ms")
+        }
     }
 }
 
