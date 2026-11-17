@@ -221,6 +221,12 @@ private struct WorkspaceGroup: View {
             ForEach(shown) { app in
                 AppIconView(app: app.appRef, size: iconSize)
                     .opacity(isActive || app.isFocused ? 1 : 0.8)
+                    .overlay(alignment: .bottom) {
+                        if a.showWindowCount && app.windowCount > 1 {
+                            WindowCountDots(count: app.windowCount, iconSize: iconSize)
+                                .offset(y: max(3, iconSize * 0.2))
+                        }
+                    }
                     .overlay(alignment: .topTrailing) {
                         if let badge = model.badge(for: app) {
                             BadgeView(label: badge, iconSize: iconSize)
@@ -245,6 +251,22 @@ private struct WorkspaceGroup: View {
                             inactiveFill: Color.white.opacity(isEmpty ? 0 : 0.06))
         }
         .scaleEffect(isTarget ? 1.06 : 1)
+    }
+}
+
+/// One dot per window (up to three) under an app icon, like the Dock's
+/// running indicator, so several windows of one app stay visible.
+private struct WindowCountDots: View {
+    let count: Int
+    let iconSize: CGFloat
+
+    var body: some View {
+        let dot = max(2.5, iconSize * 0.14)
+        HStack(spacing: dot * 0.7) {
+            ForEach(0..<min(count, 3), id: \.self) { _ in
+                Circle().fill(Color.white.opacity(0.75)).frame(width: dot, height: dot)
+            }
+        }
     }
 }
 

@@ -86,6 +86,9 @@ struct IslandConfig: Equatable {
         var maxAppsPerWorkspace = 6.0
         /// Red notification badges read from the Dock (needs Accessibility).
         var showBadges = true
+        /// Small dots under an icon when the app has several windows on
+        /// that workspace (one dot per window, up to three).
+        var showWindowCount = true
     }
 
     struct AnimationConfig: Equatable {
@@ -164,6 +167,7 @@ extension IslandConfig {
         c.appearance.appIconSize = a.number("appIconSize", c.appearance.appIconSize)
         c.appearance.maxAppsPerWorkspace = a.number("maxAppsPerWorkspace", c.appearance.maxAppsPerWorkspace)
         c.appearance.showBadges = a.bool("showBadges", c.appearance.showBadges)
+        c.appearance.showWindowCount = a.bool("showWindowCount", c.appearance.showWindowCount)
 
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
@@ -299,6 +303,8 @@ extension IslandConfig {
             "maxAppsPerWorkspace": \(n(a.maxAppsPerWorkspace)),
             // Dock에 뜨는 빨간 알림 배지를 앱 아이콘에 표시합니다 (손쉬운 사용 권한 필요).
             "showBadges": \(b(a.showBadges)),
+            // 한 앱의 창이 그 워크스페이스에 여러 개면 아이콘 아래에 점(최대 3개)을 찍습니다.
+            "showWindowCount": \(b(a.showWindowCount)),
           },
 
           "animation": {

@@ -116,6 +116,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `appearance.workspaceStyle` | `"apps"` | `apps`는 워크스페이스 번호 옆에 그 워크스페이스의 앱 아이콘을 나열하고(OmniWM 워크스페이스 바와 비슷합니다), `pills`는 번호만 보여 줍니다. |
 | `appearance.appIconSize` / `maxAppsPerWorkspace` | `20` / `6` | 앱 아이콘 크기와 워크스페이스마다 보여 줄 최대 아이콘 수입니다. 넘치는 앱은 `+N`으로 묶습니다. |
 | `appearance.showBadges` | `true` | Dock 아이콘의 빨간 알림 배지를 앱 아이콘에도 표시합니다. 손쉬운 사용 권한이 필요하며, `behavior.badgeIntervalMs`(기본 3000) 간격으로 다시 읽습니다. |
+| `appearance.showWindowCount` | `true` | 한 워크스페이스에 창이 여러 개 있는 앱은 아이콘 아래에 창 개수만큼 점을 표시합니다(최대 3개). |
 | `appearance.*` | | 배경색과 불투명도, 강조색, 글자색, 모서리 반경, 글자 크기, 알약 크기, 그림자, 펼친 너비와 높이, 앱 아이콘 표시 여부입니다. 색상은 `#RRGGBB` 또는 `#RRGGBBAA`로 적습니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
