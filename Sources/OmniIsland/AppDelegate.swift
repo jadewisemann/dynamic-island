@@ -182,12 +182,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let display = DisplayRef(id: "demo", name: "Demo", isMain: true)
         let names = ["1", "2", "3", "4", "5"]
         let counts = [3, 1, 0, 2, 0]
-        let workspaces = zip(names, counts).map { name, count in
-            WorkspaceSnapshot(
-                id: "ws-\(name)", rawName: name, displayName: name, number: Int(name),
-                display: display, isFocused: name == "1", isVisible: name == "1", isCurrent: name == "1",
-                counts: .init(total: count, tiled: count, floating: 0, scratchpad: 0)
+        var workspaces: [WorkspaceSnapshot] = []
+        for (index, name) in names.enumerated() {
+            let count: Int = counts[index]
+            let isFirst: Bool = index == 0
+            let windowCounts = WorkspaceSnapshot.Counts(total: count, tiled: count, floating: 0, scratchpad: 0)
+            let snapshot = WorkspaceSnapshot(
+                id: "ws-" + name,
+                rawName: name,
+                displayName: name,
+                number: index + 1,
+                display: display,
+                isFocused: isFirst,
+                isVisible: isFirst,
+                isCurrent: isFirst,
+                counts: windowCounts
             )
+            workspaces.append(snapshot)
         }
         tracker.handle(.workspaces(WorkspacesPayload(workspaces: workspaces)))
         tracker.handle(.activeWorkspace(ActiveWorkspacePayload(
