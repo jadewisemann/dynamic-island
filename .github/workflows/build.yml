@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Bundle .app (release)
+        run: scripts/bundle.sh
+
+      - name: Zip app
+        run: |
+          cd build
+          ditto -c -k --keepParent OmniIsland.app OmniIsland.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OmniIsland
+          path: build/OmniIsland.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/OmniIsland.zip \
+            --title "OmniIsland $GITHUB_REF_NAME" --generate-notes
