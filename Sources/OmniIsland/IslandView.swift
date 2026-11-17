@@ -44,7 +44,7 @@ struct IslandView: View {
                     .frame(height: model.geometry.height)
                     .transition(fade)
                 WorkspaceRow(model: model, ns: ns)
-                    .frame(height: CGFloat(a.compactRowHeight))
+                    .frame(height: model.rowHeight)
                     .transition(fade)
             }
             if model.phase == .expanded, let event = model.event {
@@ -128,35 +128,148 @@ struct WorkspaceRow: View {
 
     var body: some View {
         let a = model.config.appearance
-        let accent = Color(hex: a.accentColor, fallback: .blue)
         HStack(spacing: CGFloat(a.pillSpacing)) {
             ForEach(model.workspaces) { ws in
-                let isActive = ws.id == model.activeWorkspaceKey
-                let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
-                ZStack {
-                    if isActive {
-                        Capsule()
-                            .fill(accent)
-                            .shadow(color: accent.opacity(0.55), radius: 6, x: 0, y: 0)
-                            .matchedGeometryEffect(id: "active-workspace", in: ns)
-                    } else {
-                        Capsule()
-                            .fill(Color.white.opacity(ws.windowCount > 0 ? 0.14 : 0.06))
-                    }
-                    if isTarget && !isActive {
-                        Capsule().strokeBorder(accent, lineWidth: 1.5)
-                    }
-                    Text(ws.label)
-                        .font(model.pillSwiftUIFont)
-                        .lineLimit(1)
-                        .foregroundStyle(isActive ? Color.white : Color.white.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
+                if model.usesAppStyle {
+                    WorkspaceGroup(model: model, ws: ws, ns: ns)
+                } else {
+                    WorkspacePill(model: model, ws: ws, ns: ns)
                 }
-                .frame(width: model.pillWidth(for: ws.label), height: CGFloat(a.pillSize))
-                .scaleEffect(isTarget ? 1.08 : 1)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 4)
+    }
+}
+
+/// Shared highlight behind the active workspace; slides between workspaces.
+private struct ActiveHighlight: View {
+    @ObservedObject var model: IslandModel
+    let ws: WorkspaceItem
+    let ns: Namespace.ID
+    let shape: AnyShape
+    let inactiveFill: Color
+
+    var body: some View {
+        let accent = Color(hex: model.config.appearance.accentColor, fallback: .blue)
+        let isActive = ws.id == model.activeWorkspaceKey
+        let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
+        ZStack {
+            if isActive {
+                shape
+                    .fill(accent.opacity(model.usesAppStyle ? 0.32 : 1))
+                    .shadow(color: accent.opacity(0.55), radius: 6, x: 0, y: 0)
+                    .matchedGeometryEffect(id: "active-workspace", in: ns)
+            } else {
+                shape.fill(inactiveFill)
+            }
+            if isTarget && !isActive {
+                shape.stroke(accent, lineWidth: 1.5)
+            }
+        }
+    }
+}
+
+/// "pills" style: a numbered capsule per workspace.
+private struct WorkspacePill: View {
+    @ObservedObject var model: IslandModel
+    let ws: WorkspaceItem
+    let ns: Namespace.ID
+
+    var body: some View {
+        let a = model.config.appearance
+        let isActive = ws.id == model.activeWorkspaceKey
+        let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
+        ZStack {
+            ActiveHighlight(model: model, ws: ws, ns: ns, shape: AnyShape(Capsule()),
+                            inactiveFill: Color.white.opacity(ws.windowCount > 0 ? 0.14 : 0.06))
+            Text(ws.label)
+                .font(model.pillSwiftUIFont)
+                .lineLimit(1)
+                .foregroundStyle(isActive ? Color.white : Color.white.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
+        }
+        .frame(width: model.pillWidth(for: ws.label), height: CGFloat(a.pillSize))
+        .scaleEffect(isTarget ? 1.08 : 1)
+    }
+}
+
+/// "apps" style: workspace label followed by the icons of its apps, with
+/// Dock notification badges, similar to OmniWM's own workspace bar.
+private struct WorkspaceGroup: View {
+    @ObservedObject var model: IslandModel
+    let ws: WorkspaceItem
+    let ns: Namespace.ID
+
+    var body: some View {
+        let a = model.config.appearance
+        let isActive = ws.id == model.activeWorkspaceKey
+        let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
+        let iconSize = CGFloat(a.appIconSize)
+        let shown = Array(ws.apps.prefix(model.maxAppsPerWorkspace))
+        let hidden = ws.apps.count - shown.count
+        let isEmpty = ws.apps.isEmpty && ws.windowCount == 0
+
+        HStack(spacing: IslandModel.appIconGap) {
+            Text(ws.label)
+                .font(.system(size: CGFloat(a.fontSize) * 1.05,
+                              weight: isActive ? .heavy : .semibold,
+                              design: .rounded))
+                .foregroundStyle(Color.white.opacity(isActive ? 1 : (isEmpty ? 0.35 : 0.6)))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.trailing, shown.isEmpty ? 0 : 2)
+            ForEach(shown) { app in
+                AppIconView(app: app.appRef, size: iconSize)
+                    .opacity(isActive || app.isFocused ? 1 : 0.8)
+                    .overlay(alignment: .topTrailing) {
+                        if let badge = model.badge(for: app) {
+                            BadgeView(label: badge, iconSize: iconSize)
+                                .offset(x: iconSize * 0.18, y: -iconSize * 0.18)
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+            }
+            if hidden > 0 {
+                Text("+\(hidden)")
+                    .font(.system(size: CGFloat(a.fontSize) * 0.8, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.6))
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, IslandModel.groupPadding)
+        .frame(height: iconSize + 8)
+        .background {
+            ActiveHighlight(model: model, ws: ws, ns: ns,
+                            shape: AnyShape(RoundedRectangle(cornerRadius: (iconSize + 8) / 2.6, style: .continuous)),
+                            inactiveFill: Color.white.opacity(isEmpty ? 0 : 0.06))
+        }
+        .scaleEffect(isTarget ? 1.06 : 1)
+    }
+}
+
+/// Red Dock-style notification badge. Numbers up to two digits are shown,
+/// anything else becomes a dot.
+private struct BadgeView: View {
+    let label: String
+    let iconSize: CGFloat
+
+    var body: some View {
+        let short = label.count <= 2 && Int(label) != nil
+        let size = max(8, iconSize * (short ? 0.55 : 0.4))
+        ZStack {
+            Capsule().fill(Color(red: 1, green: 0.23, blue: 0.19))
+            if short {
+                Text(label)
+                    .font(.system(size: size * 0.68, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, size * 0.22)
+            }
+        }
+        .frame(minWidth: size, maxHeight: size)
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(height: size)
+        .overlay(Capsule().stroke(Color.black.opacity(0.6), lineWidth: 1))
     }
 }
 

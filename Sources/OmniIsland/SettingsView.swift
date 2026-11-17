@@ -225,6 +225,28 @@ private struct AppearanceSettings: View {
                           range: 40...90, step: 1, unit: "pt")
             }
 
+            Section("워크스페이스 줄") {
+                Picker("표시 방식", selection: $model.draft.appearance.workspaceStyle) {
+                    Text("번호와 앱 아이콘").tag("apps")
+                    Text("번호만").tag("pills")
+                }
+                .pickerStyle(.segmented)
+                if model.draft.appearance.workspaceStyle != "pills" {
+                    SliderRow(title: "앱 아이콘 크기", value: $model.draft.appearance.appIconSize,
+                              range: 14...32, step: 1, unit: "pt")
+                    SliderRow(title: "워크스페이스당 최대 아이콘", value: $model.draft.appearance.maxAppsPerWorkspace,
+                              range: 1...12, step: 1, unit: "개")
+                    Toggle("알림 배지 표시", isOn: $model.draft.appearance.showBadges)
+                    if model.draft.appearance.showBadges {
+                        SliderRow(title: "배지 확인 간격", value: $model.draft.behavior.badgeIntervalMs,
+                                  range: 1000...10000, step: 500, unit: "ms")
+                        Text("배지는 Dock에 표시된 빨간 알림 숫자를 읽어 옵니다. 손쉬운 사용 권한이 필요합니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("내용") {
                 SliderRow(title: "글자 크기", value: $model.draft.appearance.fontSize,
                           range: 10...18, step: 0.5, unit: "pt", decimals: 1)

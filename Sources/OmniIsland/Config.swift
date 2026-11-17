@@ -48,6 +48,8 @@ struct IslandConfig: Equatable {
         /// Merge events that arrive within this window (a window move that also
         /// switches workspace becomes one "window moved" event).
         var coalesceMs = 140.0
+        /// How often Dock notification badges are re-read.
+        var badgeIntervalMs = 3000.0
     }
 
     struct Appearance: Equatable {
@@ -76,6 +78,14 @@ struct IslandConfig: Equatable {
         var showFocusedApp = true
         var borderOpacity = 0.0
         var showEventProgress = true
+        /// apps: workspace number followed by its app icons (like OmniWM's
+        /// workspace bar). pills: compact numbered capsules only.
+        var workspaceStyle = "apps"
+        var appIconSize = 20.0
+        /// Icons shown per workspace before collapsing the rest into "+N".
+        var maxAppsPerWorkspace = 6.0
+        /// Red notification badges read from the Dock (needs Accessibility).
+        var showBadges = true
     }
 
     struct AnimationConfig: Equatable {
@@ -127,6 +137,7 @@ extension IslandConfig {
         c.behavior.hiddenStyle = b.string("hiddenStyle", c.behavior.hiddenStyle)
         c.behavior.showMenuBarIcon = b.bool("showMenuBarIcon", c.behavior.showMenuBarIcon)
         c.behavior.coalesceMs = b.number("coalesceMs", c.behavior.coalesceMs)
+        c.behavior.badgeIntervalMs = b.number("badgeIntervalMs", c.behavior.badgeIntervalMs)
 
         let a = r.sub("appearance")
         c.appearance.backgroundColor = a.string("backgroundColor", c.appearance.backgroundColor)
@@ -149,6 +160,10 @@ extension IslandConfig {
         c.appearance.showFocusedApp = a.bool("showFocusedApp", c.appearance.showFocusedApp)
         c.appearance.borderOpacity = a.number("borderOpacity", c.appearance.borderOpacity)
         c.appearance.showEventProgress = a.bool("showEventProgress", c.appearance.showEventProgress)
+        c.appearance.workspaceStyle = a.string("workspaceStyle", c.appearance.workspaceStyle)
+        c.appearance.appIconSize = a.number("appIconSize", c.appearance.appIconSize)
+        c.appearance.maxAppsPerWorkspace = a.number("maxAppsPerWorkspace", c.appearance.maxAppsPerWorkspace)
+        c.appearance.showBadges = a.bool("showBadges", c.appearance.showBadges)
 
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
@@ -250,6 +265,8 @@ extension IslandConfig {
             "hiddenStyle": \(q(be.hiddenStyle)),
             "showMenuBarIcon": \(b(be.showMenuBarIcon)),
             "coalesceMs": \(n(be.coalesceMs)),
+            // Dock 알림 배지를 다시 읽는 간격입니다.
+            "badgeIntervalMs": \(n(be.badgeIntervalMs)),
           },
 
           "appearance": {
@@ -275,6 +292,13 @@ extension IslandConfig {
             "showFocusedApp": \(b(a.showFocusedApp)),
             // 펼쳐진 상태가 끝날 때까지 남은 시간을 아래쪽 막대로 보여 줍니다.
             "showEventProgress": \(b(a.showEventProgress)),
+            // apps: 워크스페이스 번호 옆에 앱 아이콘을 나열 (OmniWM 바와 비슷)
+            // pills: 번호만 있는 작은 알약
+            "workspaceStyle": \(q(a.workspaceStyle)),
+            "appIconSize": \(n(a.appIconSize)),
+            "maxAppsPerWorkspace": \(n(a.maxAppsPerWorkspace)),
+            // Dock에 뜨는 빨간 알림 배지를 앱 아이콘에 표시합니다 (손쉬운 사용 권한 필요).
+            "showBadges": \(b(a.showBadges)),
           },
 
           "animation": {

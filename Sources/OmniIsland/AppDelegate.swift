@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let tracker = WMStateTracker()
     private let client = OmniWMClient()
     private let modifiers = ModifierMonitor()
+    private let badgeMonitor = DockBadgeMonitor()
     private var windowController: IslandWindowController?
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
@@ -50,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.model.update(from: self.tracker)
             self.windowController?.setPreferredDisplay(name: self.tracker.activeDisplay?.name)
+            // The island may have grown (more workspaces or apps).
+            self.windowController?.reposition()
         }
         tracker.onEvent = { [weak self] event in
             self?.model.present(event)
@@ -67,7 +70,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             exactMatch: configStore.config.trigger.exactMatch)
         modifiers.onChange = { [weak self] held in
             self?.model.modifierChanged(held: held)
+            if held { self?.badgeMonitor.refresh() }
         }
+
+        badgeMonitor.onChange = { [weak self] labels in
+            self?.model.setBadges(labels)
+        }
+        configureBadges(configStore.config)
         modifiers.start(promptForAccessibility: !isDemo)
 
         rebuildStatusItem()
@@ -96,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.apply(config: config)
         model.update(from: tracker)
         modifiers.configure(modifier: config.trigger.modifier, exactMatch: config.trigger.exactMatch)
+        configureBadges(config)
         windowController?.reposition()
         if previous.omniwmctlPath != config.omniwmctlPath || previous.socketPath != config.socketPath {
             if !isDemo {
@@ -109,6 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsModel?.configError = configStore.lastError
         configErrorMenuItem?.title = configStore.lastError ?? ""
         configErrorMenuItem?.isHidden = configStore.lastError == nil
+    }
+
+    private func configureBadges(_ config: IslandConfig) {
+        let wanted = config.appearance.showBadges && config.appearance.workspaceStyle.lowercased() != "pills"
+        badgeMonitor.configure(enabled: wanted && !isDemo, intervalMs: config.behavior.badgeIntervalMs)
     }
 
     // MARK: - Status item
@@ -276,6 +291,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             workspaces.append(snapshot)
         }
         tracker.handle(.workspaces(WorkspacesPayload(workspaces: workspaces)))
+
+        let demoApps: [(String, String, String)] = [
+            ("1", "Finder", "com.apple.finder"),
+            ("1", "Safari", "com.apple.Safari"),
+            ("1", "Safari", "com.apple.Safari"),
+            ("2", "Messages", "com.apple.MobileSMS"),
+            ("4", "Mail", "com.apple.mail"),
+            ("4", "System Settings", "com.apple.systempreferences"),
+        ]
+        var demoWindows: [WindowSnapshot] = []
+        for (index, entry) in demoApps.enumerated() {
+            let ws = workspaces.first { $0.rawName == entry.0 }?.ref
+            let window = WindowSnapshot(
+                id: "demo-\(index)",
+                workspace: ws,
+                display: display,
+                app: AppRef(name: entry.1, bundleId: entry.2),
+                title: entry.1,
+                isFocused: index == 0,
+                isScratchpad: false
+            )
+            demoWindows.append(window)
+        }
+        tracker.handle(.windows(WindowsPayload(windows: demoWindows)))
+        model.setBadges(["com.apple.mobilesms": "2", "com.apple.mail": "•"])
         tracker.handle(.activeWorkspace(ActiveWorkspacePayload(
             display: display,
             workspace: workspaces[0].ref,

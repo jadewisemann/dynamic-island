@@ -9,6 +9,19 @@ struct WorkspaceItem: Identifiable, Equatable {
     let displayName: String?
     let windowCount: Int
     let isVisible: Bool
+    /// Apps on this workspace in layout order, one entry per app.
+    var apps: [WorkspaceApp] = []
+}
+
+struct WorkspaceApp: Identifiable, Equatable {
+    /// Lower-cased bundle id, or the app name when OmniWM has no bundle id.
+    let id: String
+    let name: String
+    let bundleId: String?
+    var windowCount: Int
+    var isFocused: Bool
+
+    var appRef: AppRef { AppRef(name: name, bundleId: bundleId) }
 }
 
 /// Something that actually happened and deserves an expanded island.
@@ -56,12 +69,15 @@ final class WMStateTracker {
     /// window id → workspace it was last seen on.
     private var windowWorkspace: [String: WorkspaceRef] = [:]
     private var windowInfo: [String: WindowSnapshot] = [:]
+    /// Latest windows-changed snapshot, in OmniWM's order (workspace, then layout).
+    private(set) var windows: [WindowSnapshot] = []
     private var hasWindowBaseline = false
     /// display id → active workspace on that display.
     private var activeByDisplay: [String: WorkspaceRef] = [:]
     private var hasActiveBaseline = false
 
     func reset() {
+        windows.removeAll()
         windowWorkspace.removeAll()
         windowInfo.removeAll()
         hasWindowBaseline = false
@@ -102,6 +118,7 @@ final class WMStateTracker {
             if key == activeKey || ws.isVisible == true || ws.isCurrent == true { return true }
             return includeEmpty || (ws.counts?.total ?? 0) > 0
         }
+        let appsByWorkspace = appsGroupedByWorkspace()
         return filtered.map { ws in
             WorkspaceItem(
                 id: ws.ref.key,
@@ -110,9 +127,40 @@ final class WMStateTracker {
                 displayId: ws.display?.id,
                 displayName: ws.display?.name,
                 windowCount: ws.counts?.total ?? 0,
-                isVisible: ws.isVisible ?? false
+                isVisible: ws.isVisible ?? false,
+                apps: appsByWorkspace[ws.ref.key] ?? []
             )
         }
+    }
+
+    /// workspace key → apps on it, built from the windows-changed snapshot.
+    /// Scratchpad windows are left out because they float above workspaces.
+    func appsGroupedByWorkspace() -> [String: [WorkspaceApp]] {
+        var result: [String: [WorkspaceApp]] = [:]
+        for window in windows {
+            guard window.isScratchpad != true, let ws = window.workspace else { continue }
+            let name = window.app?.name ?? "?"
+            let bundleId = window.app?.bundleId
+            let appKey = (bundleId?.lowercased()).flatMap { $0.isEmpty ? nil : $0 } ?? name
+            let wsKey = ws.key
+            var apps = result[wsKey] ?? []
+            if let index = apps.firstIndex(where: { $0.id == appKey }) {
+                apps[index].windowCount += 1
+                if window.isFocused == true { apps[index].isFocused = true }
+            } else {
+                apps.append(WorkspaceApp(
+                    id: appKey, name: name, bundleId: bundleId,
+                    windowCount: 1, isFocused: window.isFocused == true
+                ))
+            }
+            result[wsKey] = apps
+        }
+        return result
+    }
+
+    /// Bundle ids of every managed app, for the Dock badge reader.
+    var managedBundleIds: Set<String> {
+        Set(windows.compactMap { $0.app?.bundleId?.lowercased() }.filter { !$0.isEmpty })
     }
 
     // MARK: - Diffing
@@ -174,6 +222,7 @@ final class WMStateTracker {
 
         windowWorkspace = nextWorkspace
         windowInfo = nextInfo
+        self.windows = windows
         hasWindowBaseline = true
         if let focused = windows.first(where: { $0.isFocused == true }) {
             focusedApp = focused.app ?? focusedApp

@@ -28,6 +28,8 @@ final class IslandModel: ObservableObject {
     @Published private(set) var event: IslandEvent?
     @Published private(set) var eventSerial = 0
     @Published private(set) var config = IslandConfig()
+    /// Dock notification badges, keyed by lower-cased bundle id.
+    @Published private(set) var badges: [String: String] = [:]
     @Published var geometry = NotchGeometry(width: 200, height: 32, hasNotch: false)
 
     private(set) var modifierHeld = false
@@ -56,6 +58,16 @@ final class IslandModel: ObservableObject {
             self.activeWorkspaceLabel = label
             self.focusedApp = app
         }
+    }
+
+    func setBadges(_ labels: [String: String]) {
+        guard labels != badges else { return }
+        animate { self.badges = labels }
+    }
+
+    func badge(for app: WorkspaceApp) -> String? {
+        guard config.appearance.showBadges, let id = app.bundleId?.lowercased() else { return nil }
+        return badges[id]
     }
 
     func modifierChanged(held: Bool) {
@@ -127,18 +139,47 @@ final class IslandModel: ObservableObject {
         return max(CGFloat(config.appearance.pillSize), ceil(text) + 14)
     }
 
+    var usesAppStyle: Bool { config.appearance.workspaceStyle.lowercased() != "pills" }
+
+    var maxAppsPerWorkspace: Int { max(1, Int(config.appearance.maxAppsPerWorkspace)) }
+
+    static let appIconGap: CGFloat = 4
+    static let groupPadding: CGFloat = 8
+
+    /// Width of one workspace group in the "apps" style:
+    /// [pad] label [gap] icon icon … (+N) [pad]
+    func groupWidth(for ws: WorkspaceItem) -> CGFloat {
+        let a = config.appearance
+        let label = pillWidth(for: ws.label) - 8
+        let shown = min(ws.apps.count, maxAppsPerWorkspace)
+        var width = Self.groupPadding * 2 + label
+        if shown > 0 {
+            width += CGFloat(shown) * (CGFloat(a.appIconSize) + Self.appIconGap)
+        }
+        if ws.apps.count > shown {
+            width += pillWidth(for: "+\(ws.apps.count - shown)") - 4
+        }
+        return ceil(width)
+    }
+
+    var rowHeight: CGFloat {
+        let a = config.appearance
+        let needed = usesAppStyle ? CGFloat(a.appIconSize) + 16 : CGFloat(a.pillSize) + 12
+        return max(CGFloat(a.compactRowHeight), needed)
+    }
+
     var rowContentWidth: CGFloat {
         let a = config.appearance
-        let pills = workspaces.map { pillWidth(for: $0.label) }.reduce(0, +)
+        let items = workspaces.map { usesAppStyle ? groupWidth(for: $0) : pillWidth(for: $0.label) }
         let spacing = CGFloat(a.pillSpacing) * CGFloat(max(workspaces.count - 1, 0))
-        return pills + spacing
+        return items.reduce(0, +) + spacing
     }
 
     var compactSize: CGSize {
         let a = config.appearance
         let wings: CGFloat = a.showFocusedApp ? 76 : 28
         let width = max(geometry.width + 2 * wings, rowContentWidth + 40)
-        return CGSize(width: width, height: geometry.height + CGFloat(a.compactRowHeight))
+        return CGSize(width: width, height: geometry.height + rowHeight)
     }
 
     var expandedSize: CGSize {
@@ -146,7 +187,7 @@ final class IslandModel: ObservableObject {
         let width = max(CGFloat(a.expandedWidth), compactSize.width)
         return CGSize(
             width: width,
-            height: geometry.height + CGFloat(a.compactRowHeight) + CGFloat(a.expandedHeaderHeight)
+            height: geometry.height + rowHeight + CGFloat(a.expandedHeaderHeight)
         )
     }
 
