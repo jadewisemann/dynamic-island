@@ -58,7 +58,19 @@ struct IslandView: View {
         .padding(.horizontal, topInset)
         .frame(width: size.width, height: size.height, alignment: .top)
         .background(background)
+        .overlay(alignment: .bottom) {
+            if model.phase == .expanded && a.showEventProgress {
+                EventProgressBar(model: model)
+                    .id(model.eventSerial)
+                    .transition(.opacity)
+            }
+        }
         .clipShape(shape)
+        .overlay {
+            if !isHidden && a.borderOpacity > 0 {
+                shape.stroke(Color.white.opacity(a.borderOpacity), lineWidth: 1)
+            }
+        }
         .shadow(
             color: .black.opacity(a.shadow && !isHidden ? 0.35 : 0),
             radius: isHidden ? 0 : 14, x: 0, y: 6
@@ -71,10 +83,10 @@ struct IslandView: View {
     private var fade: AnyTransition {
         let blur = model.config.animation.blurTransitions
         return .asymmetric(
-            insertion: .modifier(
+            insertion: AnyTransition.modifier(
                 active: BlurFade(radius: blur ? 6 : 0, opacity: 0, scale: 0.92),
                 identity: BlurFade(radius: 0, opacity: 1, scale: 1)
-            ),
+            ).animation(model.swiftUIAnimation?.delay(0.06)),
             removal: .modifier(
                 active: BlurFade(radius: blur ? 4 : 0, opacity: 0, scale: 0.96),
                 identity: BlurFade(radius: 0, opacity: 1, scale: 1)
@@ -125,6 +137,7 @@ struct WorkspaceRow: View {
                     if isActive {
                         Capsule()
                             .fill(accent)
+                            .shadow(color: accent.opacity(0.55), radius: 6, x: 0, y: 0)
                             .matchedGeometryEffect(id: "active-workspace", in: ns)
                     } else {
                         Capsule()
@@ -319,6 +332,31 @@ struct PopEffect: ViewModifier {
                 SpringKeyframe(CGFloat(1.045), duration: 0.16, spring: .snappy)
                 SpringKeyframe(CGFloat(1), duration: 0.4, spring: .bouncy)
             }
+        }
+    }
+}
+
+/// Thin accent line along the bottom edge that runs out while the expanded
+/// event is on screen.
+struct EventProgressBar: View {
+    @ObservedObject var model: IslandModel
+    @State private var remaining: CGFloat = 1
+
+    var body: some View {
+        let accent = Color(hex: model.config.appearance.accentColor, fallback: .blue)
+        let duration = max(model.config.behavior.eventDurationMs, 100) / 1000
+        GeometryReader { proxy in
+            Capsule()
+                .fill(accent.opacity(0.85))
+                .frame(width: proxy.size.width * remaining, height: 2)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(height: 2)
+        .padding(.horizontal, CGFloat(model.config.appearance.bottomCornerRadius) + 8)
+        .padding(.bottom, 3)
+        .onAppear {
+            remaining = 1
+            withAnimation(.linear(duration: duration)) { remaining = 0 }
         }
     }
 }

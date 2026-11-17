@@ -6,6 +6,8 @@ import Foundation
 final class ConfigStore {
     private(set) var config = IslandConfig()
     private(set) var lastError: String?
+    /// True when this launch wrote the default file (first run).
+    private(set) var createdDefaultFile = false
     var onChange: ((IslandConfig) -> Void)?
 
     let fileURL: URL
@@ -47,6 +49,29 @@ final class ConfigStore {
         }
     }
 
+    /// Writes `config` to disk (as commented JSON5) and applies it.
+    /// Returns the config as it will be read back, so callers stay in sync.
+    @discardableResult
+    func save(_ newConfig: IslandConfig) -> IslandConfig {
+        let text = newConfig.fileContents()
+        let data = Data(text.utf8)
+        let normalized = (try? IslandConfig.parse(data)) ?? newConfig
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: fileURL, options: .atomic)
+            lastError = nil
+        } catch {
+            lastError = "설정 파일을 저장하지 못했습니다: \(error.localizedDescription)"
+            Log.info(lastError ?? "")
+        }
+        if normalized != config {
+            config = normalized
+            onChange?(normalized)
+        }
+        return normalized
+    }
+
     private func ensureDefaultFile() {
         let fm = FileManager.default
         let dir = fileURL.deletingLastPathComponent()
@@ -55,6 +80,7 @@ final class ConfigStore {
         }
         if !fm.fileExists(atPath: fileURL.path) {
             try? IslandConfig.defaultFileContents.data(using: .utf8)?.write(to: fileURL, options: .atomic)
+            createdDefaultFile = true
         }
     }
 

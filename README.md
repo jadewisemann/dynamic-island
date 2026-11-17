@@ -76,7 +76,9 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 
 ## 설정
 
-설정 파일은 `~/.config/omni-island/config.json`입니다. 처음 실행할 때 주석이 달린 기본 파일이 만들어지고, 메뉴 막대 아이콘 → "설정 파일 열기"로 바로 열 수 있습니다. JSON5 형식이라 `//` 주석과 끝 쉼표를 쓸 수 있으며, 적지 않은 항목은 기본값을 사용합니다.
+메뉴 막대의 캡슐 아이콘 → **설정…**(⌘,)을 누르면 설정 창이 열립니다. 일반, 모양, 애니메이션, 연결 탭에서 값을 바꾸면 바로 아일랜드에 반영되고 설정 파일에도 저장되므로, 파일을 직접 고칠 필요는 없습니다. 처음 실행할 때와, 메뉴 막대 아이콘을 숨긴 상태에서 앱을 다시 열 때에도 설정 창이 나타납니다.
+
+설정 창이 저장하는 파일은 `~/.config/omni-island/config.json`입니다. 처음 실행할 때 주석이 달린 기본 파일이 만들어지고, 메뉴 막대 아이콘 → "설정 파일 열기"로 바로 열 수 있습니다. JSON5 형식이라 `//` 주석과 끝 쉼표를 쓸 수 있으며, 적지 않은 항목은 기본값을 사용합니다.
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
@@ -93,6 +95,8 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `behavior.screen` | `"notch"` | `notch`(노치 있는 화면), `main`(메뉴 막대 화면), `active`(OmniWM이 조작 중인 모니터) 중 하나입니다. |
 | `behavior.hiddenStyle` | `"auto"` | `notch`는 숨었을 때 노치 크기의 검은 모양을 남기고, `fade`는 완전히 사라집니다. `auto`는 화면에 노치가 있는지 보고 고릅니다. |
 | `behavior.coalesceMs` | `140` | 이 시간 안에 겹친 이벤트를 하나로 합칩니다. |
+| `appearance.borderOpacity` | `0` | 가장자리에 그리는 얇은 밝은 테두리의 불투명도입니다. |
+| `appearance.showEventProgress` | `true` | 펼쳐진 상태가 끝날 때까지 남은 시간을 아래쪽 막대로 보여 줍니다. |
 | `appearance.*` | | 배경색과 불투명도, 강조색, 글자색, 모서리 반경, 글자 크기, 알약 크기, 그림자, 펼친 너비와 높이, 앱 아이콘 표시 여부입니다. 색상은 `#RRGGBB` 또는 `#RRGGBBAA`로 적습니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |

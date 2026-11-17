@@ -27,12 +27,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var accessibilityMenuItem: NSMenuItem?
     private var configErrorMenuItem: NSMenuItem?
     private var demoStep = 0
+    private var settingsModel: SettingsModel?
+    private var settingsController: SettingsWindowController?
 
     private let isDemo = CommandLine.arguments.contains("--demo")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configStore.start()
         model.apply(config: configStore.config)
+        installMainMenu()
+        setUpSettings()
 
         let wc = IslandWindowController(model: model)
         windowController = wc
@@ -56,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         client.onStatus = { [weak self] status in
             self?.statusMenuItem?.title = status.label
+            self?.settingsModel?.connectionStatus = status.label
         }
 
         modifiers.configure(modifier: configStore.config.trigger.modifier,
@@ -66,6 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modifiers.start(promptForAccessibility: !isDemo)
 
         rebuildStatusItem()
+        settingsModel?.connectionStatus = isDemo ? "데모 모드" : client.status.label
+
+        if configStore.createdDefaultFile || !configStore.config.behavior.showMenuBarIcon {
+            showSettings()
+        }
 
         if isDemo {
             loadDemoState()
@@ -95,6 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if previous.behavior.showMenuBarIcon != config.behavior.showMenuBarIcon {
             rebuildStatusItem()
         }
+        settingsModel?.sync(config)
+        settingsModel?.configError = configStore.lastError
         configErrorMenuItem?.title = configStore.lastError ?? ""
         configErrorMenuItem?.isHidden = configStore.lastError == nil
     }
@@ -131,7 +143,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
         menu.addItem(makeItem("애니메이션 미리보기", #selector(playDemo), "p"))
-        menu.addItem(makeItem("설정 파일 열기", #selector(openConfig), ","))
+        menu.addItem(makeItem("설정…", #selector(showSettings), ","))
+        menu.addItem(makeItem("설정 파일 열기", #selector(openConfig), ""))
         menu.addItem(makeItem("설정 다시 불러오기", #selector(reloadConfig), "r"))
         menu.addItem(makeItem("OmniWM 다시 연결", #selector(reconnect), ""))
         menu.addItem(.separator())
@@ -145,6 +158,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = self
         return item
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Opening the app again (e.g. from Finder) shows the settings, which
+        // matters when the menu bar icon is hidden.
+        showSettings()
+        return false
+    }
+
+    private func setUpSettings() {
+        let settings = SettingsModel(config: configStore.config, configPath: configStore.fileURL.path)
+        settings.onSave = { [weak self] config in
+            guard let self else { return config }
+            let normalized = self.configStore.save(config)
+            self.settingsModel?.configError = self.configStore.lastError
+            return normalized
+        }
+        settings.onPreview = { [weak self] in self?.playDemo() }
+        settings.onOpenFile = { [weak self] in self?.openConfig() }
+        settings.onOpenAccessibility = { [weak self] in
+            self?.openAccessibility()
+        }
+        settingsModel = settings
+        settingsController = SettingsWindowController(model: settings)
+    }
+
+    @objc private func showSettings() {
+        settingsModel?.accessibilityGranted = ModifierMonitor.isTrusted(prompt: false)
+        settingsModel?.configError = configStore.lastError
+        settingsController?.show()
+    }
+
+    /// Accessory apps have no visible menu bar, but the main menu still
+    /// provides ⌘C / ⌘V / ⌘A / ⌘W in the settings window.
+    private func installMainMenu() {
+        let main = NSMenu()
+
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "OmniIsland 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        let edit = NSMenu(title: "편집")
+        edit.addItem(withTitle: "실행 취소", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "실행 복귀", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "잘라내기", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "복사", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "붙여넣기", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "모두 선택", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit
+        main.addItem(editItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "윈도우")
+        windowMenu.addItem(withTitle: "닫기", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+
+        NSApp.mainMenu = main
     }
 
     @objc private func openConfig() {
@@ -247,7 +322,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        accessibilityMenuItem?.isHidden = ModifierMonitor.isTrusted(prompt: false)
+        let trusted = ModifierMonitor.isTrusted(prompt: false)
+        accessibilityMenuItem?.isHidden = trusted
+        settingsModel?.accessibilityGranted = trusted
         if !isDemo { statusMenuItem?.title = client.status.label }
     }
 }

@@ -31,15 +31,17 @@ struct NotchShape: Shape {
         )
         // Left side down to the bottom-left corner.
         p.addLine(to: CGPoint(x: rect.minX + top, y: rect.minY + h - bottom))
-        p.addQuadCurve(
-            to: CGPoint(x: rect.minX + top + bottom, y: rect.minY + h),
-            control: CGPoint(x: rect.minX + top, y: rect.minY + h)
+        p.addArc(
+            tangent1End: CGPoint(x: rect.minX + top, y: rect.minY + h),
+            tangent2End: CGPoint(x: rect.minX + top + bottom, y: rect.minY + h),
+            radius: bottom
         )
         // Bottom edge.
         p.addLine(to: CGPoint(x: rect.maxX - top - bottom, y: rect.minY + h))
-        p.addQuadCurve(
-            to: CGPoint(x: rect.maxX - top, y: rect.minY + h - bottom),
-            control: CGPoint(x: rect.maxX - top, y: rect.minY + h)
+        p.addArc(
+            tangent1End: CGPoint(x: rect.maxX - top, y: rect.minY + h),
+            tangent2End: CGPoint(x: rect.maxX - top, y: rect.minY + h - bottom),
+            radius: bottom
         )
         // Right side up to the right shoulder.
         p.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))

@@ -73,6 +73,8 @@ struct IslandConfig: Equatable {
         var expandedHeaderHeight = 54.0
         var showAppIcons = true
         var showFocusedApp = true
+        var borderOpacity = 0.0
+        var showEventProgress = true
     }
 
     struct AnimationConfig: Equatable {
@@ -144,6 +146,8 @@ extension IslandConfig {
         c.appearance.expandedHeaderHeight = a.number("expandedHeaderHeight", c.appearance.expandedHeaderHeight)
         c.appearance.showAppIcons = a.bool("showAppIcons", c.appearance.showAppIcons)
         c.appearance.showFocusedApp = a.bool("showFocusedApp", c.appearance.showFocusedApp)
+        c.appearance.borderOpacity = a.number("borderOpacity", c.appearance.borderOpacity)
+        c.appearance.showEventProgress = a.bool("showEventProgress", c.appearance.showEventProgress)
 
         let n = r.sub("animation")
         c.animation.style = n.string("style", c.animation.style)
@@ -189,76 +193,100 @@ private struct ConfigReader {
     }
 }
 
-// MARK: - Default file
+// MARK: - Writing
 
 extension IslandConfig {
-    /// Written on first launch. Keep in sync with the defaults above.
-    static let defaultFileContents = """
-    // OmniIsland 설정 파일 (JSON5: 주석과 끝 쉼표를 쓸 수 있습니다)
-    // 저장하면 앱이 자동으로 다시 불러옵니다.
-    {
-      // omniwmctl 경로. 비워 두면 PATH, ~/.local/bin, /opt/homebrew/bin,
-      // /Applications/OmniWM.app/Contents/MacOS 순서로 찾습니다.
-      "omniwmctlPath": "",
-      // OmniWM IPC 소켓 경로를 바꿨다면 여기에 적습니다 (OMNIWM_SOCKET).
-      "socketPath": "",
+    static var defaultFileContents: String { IslandConfig().fileContents() }
 
-      "trigger": {
-        // option | leftOption | rightOption | command | control | shift ...
-        // "control+option"처럼 조합할 수도 있습니다.
-        "modifier": "option",
-        "holdDelayMs": 120,
-        "hideDelayMs": 160,
-        // true면 다른 modifier 없이 이 키만 눌렀을 때만 나타납니다.
-        "exactMatch": true,
-      },
+    /// Renders the config as commented JSON5. Used for the first-launch file
+    /// and every time the settings window saves.
+    func fileContents() -> String {
+        func q(_ s: String?) -> String {
+            let data = try? JSONSerialization.data(withJSONObject: [s ?? ""], options: [.withoutEscapingSlashes])
+            let array = data.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+            return String(array.dropFirst().dropLast())
+        }
+        func n(_ v: Double) -> String {
+            if v.rounded() == v && abs(v) < 1e9 { return String(Int(v)) }
+            var text = String(format: "%.3f", v)
+            while text.hasSuffix("0") { text.removeLast() }
+            return text
+        }
+        func b(_ v: Bool) -> String { v ? "true" : "false" }
+        let t = trigger, be = behavior, a = appearance, an = animation
 
-      "behavior": {
-        // modifier를 누르지 않았을 때도 이동이 일어나면 펼쳐서 보여 줍니다.
-        "showEventsWithoutModifier": true,
-        "eventDurationMs": 1700,
-        "showWorkspaceSwitch": true,
-        "showWindowMove": true,
-        "showEmptyWorkspaces": false,
-        // notch | main | active (OmniWM이 지금 조작 중인 모니터)
-        "screen": "notch",
-        // auto | notch | fade
-        "hiddenStyle": "auto",
-        "showMenuBarIcon": true,
-        "coalesceMs": 140,
-      },
+        return """
+        // OmniIsland 설정 파일 (JSON5: 주석과 끝 쉼표를 쓸 수 있습니다)
+        // 메뉴 막대 아이콘 → "설정…"에서 바꾸는 것을 권장합니다.
+        // 직접 고쳐도 저장하면 앱이 자동으로 다시 불러옵니다.
+        {
+          // omniwmctl 경로. 비워 두면 PATH, ~/.local/bin, /opt/homebrew/bin,
+          // /Applications/OmniWM.app/Contents/MacOS 순서로 찾습니다.
+          "omniwmctlPath": \(q(omniwmctlPath)),
+          // OmniWM IPC 소켓 경로를 바꿨다면 여기에 적습니다 (OMNIWM_SOCKET).
+          "socketPath": \(q(socketPath)),
 
-      "appearance": {
-        "backgroundColor": "#000000",
-        "backgroundOpacity": 1.0,
-        "accentColor": "#0A84FF",
-        "textColor": "#FFFFFF",
-        "secondaryTextColor": "#FFFFFF99",
-        "bottomCornerRadius": 20,
-        "topCornerRadius": 7,
-        "fontSize": 13,
-        "pillSize": 24,
-        "pillSpacing": 6,
-        "shadow": true,
-        "fallbackNotchWidth": 200,
-        "fallbackNotchHeight": 32,
-        "compactRowHeight": 38,
-        "expandedWidth": 400,
-        "expandedHeaderHeight": 54,
-        "showAppIcons": true,
-        "showFocusedApp": true,
-      },
+          "trigger": {
+            // option | leftOption | rightOption | command | control | shift ...
+            // "control+option"처럼 조합할 수도 있습니다.
+            "modifier": \(q(t.modifier)),
+            "holdDelayMs": \(n(t.holdDelayMs)),
+            "hideDelayMs": \(n(t.hideDelayMs)),
+            // true면 다른 modifier 없이 이 키만 눌렀을 때만 나타납니다.
+            "exactMatch": \(b(t.exactMatch)),
+          },
 
-      "animation": {
-        // spring | bouncy | smooth | snappy | easeInOut | none
-        "style": "spring",
-        "response": 0.45,
-        "dampingFraction": 0.76,
-        "durationMs": 380,
-        "blurTransitions": true,
-        "popOnEvent": true,
-      },
+          "behavior": {
+            // modifier를 누르지 않았을 때도 이동이 일어나면 펼쳐서 보여 줍니다.
+            "showEventsWithoutModifier": \(b(be.showEventsWithoutModifier)),
+            "eventDurationMs": \(n(be.eventDurationMs)),
+            "showWorkspaceSwitch": \(b(be.showWorkspaceSwitch)),
+            "showWindowMove": \(b(be.showWindowMove)),
+            "showEmptyWorkspaces": \(b(be.showEmptyWorkspaces)),
+            // notch | main | active (OmniWM이 지금 조작 중인 모니터)
+            "screen": \(q(be.screen)),
+            // auto | notch | fade
+            "hiddenStyle": \(q(be.hiddenStyle)),
+            "showMenuBarIcon": \(b(be.showMenuBarIcon)),
+            "coalesceMs": \(n(be.coalesceMs)),
+          },
+
+          "appearance": {
+            "backgroundColor": \(q(a.backgroundColor)),
+            "backgroundOpacity": \(n(a.backgroundOpacity)),
+            "accentColor": \(q(a.accentColor)),
+            "textColor": \(q(a.textColor)),
+            "secondaryTextColor": \(q(a.secondaryTextColor)),
+            "bottomCornerRadius": \(n(a.bottomCornerRadius)),
+            "topCornerRadius": \(n(a.topCornerRadius)),
+            "fontSize": \(n(a.fontSize)),
+            "pillSize": \(n(a.pillSize)),
+            "pillSpacing": \(n(a.pillSpacing)),
+            "shadow": \(b(a.shadow)),
+            // 가장자리에 아주 얇은 밝은 테두리를 그립니다 (0이면 없음).
+            "borderOpacity": \(n(a.borderOpacity)),
+            "fallbackNotchWidth": \(n(a.fallbackNotchWidth)),
+            "fallbackNotchHeight": \(n(a.fallbackNotchHeight)),
+            "compactRowHeight": \(n(a.compactRowHeight)),
+            "expandedWidth": \(n(a.expandedWidth)),
+            "expandedHeaderHeight": \(n(a.expandedHeaderHeight)),
+            "showAppIcons": \(b(a.showAppIcons)),
+            "showFocusedApp": \(b(a.showFocusedApp)),
+            // 펼쳐진 상태가 끝날 때까지 남은 시간을 아래쪽 막대로 보여 줍니다.
+            "showEventProgress": \(b(a.showEventProgress)),
+          },
+
+          "animation": {
+            // spring | bouncy | smooth | snappy | easeInOut | none
+            "style": \(q(an.style)),
+            "response": \(n(an.response)),
+            "dampingFraction": \(n(an.dampingFraction)),
+            "durationMs": \(n(an.durationMs)),
+            "blurTransitions": \(b(an.blurTransitions)),
+            "popOnEvent": \(b(an.popOnEvent)),
+          },
+        }
+
+        """
     }
-
-    """
 }
