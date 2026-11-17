@@ -45,10 +45,12 @@ CNF
 openssl req -x509 -newkey rsa:2048 -nodes -days 7300 \
   -keyout key.pem -out cert.pem -config cert.cnf
 
-# OpenSSL 3 needs -legacy so that macOS `security import` can read the file.
-LEGACY=()
-if openssl version | grep -q '^OpenSSL 3'; then LEGACY=(-legacy); fi
-openssl pkcs12 -export ${LEGACY[@]+"${LEGACY[@]}"} \
+# macOS `security import` only reads PKCS#12 files that use the old
+# SHA1/3DES algorithms. OpenSSL 3 and later default to AES/SHA-256, which
+# fails with "MAC verification failed". Naming the algorithms explicitly
+# works with OpenSSL 1.1, 3.x, 4.x and macOS's LibreSSL alike.
+openssl pkcs12 -export \
+  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
   -inkey key.pem -in cert.pem -name "$NAME" \
   -out OmniIsland-signing.p12 -passout "pass:$PASSWORD"
 rm -f key.pem cert.cnf
@@ -68,7 +70,7 @@ else
   echo
   echo "GitHub CLI not available. Add two secrets by hand at"
   echo "  https://github.com/$REPO/settings/secrets/actions"
-  echo "MACOS_CERT_P12      = the output of: base64 -i '$OUT/OmniIsland-signing.p12'"
+  echo "MACOS_CERT_P12      = run this to copy it: base64 -i '$OUT/OmniIsland-signing.p12' | pbcopy"
   echo "MACOS_CERT_PASSWORD = $PASSWORD"
 fi
 

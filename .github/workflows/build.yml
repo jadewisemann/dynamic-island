@@ -66,9 +66,7 @@ jobs:
             printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=OmniIsland Signing\n[ext]\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' > "$RUNNER_TEMP/cert.cnf"
             openssl req -x509 -newkey rsa:2048 -nodes -days 30 -config "$RUNNER_TEMP/cert.cnf" \
               -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem"
-            LEGACY=""
-            if openssl version | grep -q '^OpenSSL 3'; then LEGACY="-legacy"; fi
-            openssl pkcs12 -export $LEGACY -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
+            openssl pkcs12 -export -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
               -name "OmniIsland Signing" -out "$P12" -passout "pass:$CERT_PASSWORD"
           fi
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
