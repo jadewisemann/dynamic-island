@@ -68,7 +68,7 @@ struct IslandView: View {
         .clipShape(shape)
         .overlay {
             if !isHidden && a.borderOpacity > 0 {
-                shape.stroke(Color.white.opacity(a.borderOpacity), lineWidth: 1)
+                shape.stroke(model.palette.fill.opacity(a.borderOpacity), lineWidth: 1)
             }
         }
         .shadow(
@@ -77,7 +77,7 @@ struct IslandView: View {
         )
         .opacity(isHidden && model.hiddenStyleFades ? 0 : 1)
         .modifier(PopEffect(trigger: model.config.motion.popOnEvent ? model.eventSerial : 0))
-        .foregroundStyle(Color(hex: a.textColor, fallback: .white))
+        .foregroundStyle(model.palette.text)
     }
 
     private var fade: AnyTransition {
@@ -102,7 +102,7 @@ struct IslandView: View {
                 AppIconView(app: app, size: 16)
                 Text(app.name ?? "")
                     .font(.system(size: CGFloat(a.fontSize) * 0.85, weight: .medium))
-                    .foregroundStyle(Color(hex: a.secondaryTextColor, fallback: .gray))
+                    .foregroundStyle(model.palette.secondary)
                     .lineLimit(1)
                     .frame(maxWidth: max(0, (model.currentSize.width - model.geometry.width) / 2 - 40),
                            alignment: .leading)
@@ -111,7 +111,7 @@ struct IslandView: View {
             if let label = model.activeWorkspaceLabel {
                 Text(label)
                     .font(.system(size: CGFloat(a.fontSize) * 0.9, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(hex: a.accentColor, fallback: .blue))
+                    .foregroundStyle(model.palette.accent)
                     .lineLimit(1)
                     .contentTransition(.numericText())
             }
@@ -151,7 +151,7 @@ private struct ActiveHighlight: View {
     let inactiveFill: Color
 
     var body: some View {
-        let accent = Color(hex: model.config.appearance.accentColor, fallback: .blue)
+        let accent = model.palette.accent
         let isActive = ws.id == model.activeWorkspaceKey
         let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
         ZStack {
@@ -182,11 +182,11 @@ private struct WorkspacePill: View {
         let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
         ZStack {
             ActiveHighlight(model: model, ws: ws, ns: ns, shape: AnyShape(Capsule()),
-                            inactiveFill: Color.white.opacity(ws.windowCount > 0 ? 0.14 : 0.06))
+                            inactiveFill: model.palette.fill.opacity(ws.windowCount > 0 ? 0.14 : 0.06))
             Text(ws.label)
                 .font(model.pillSwiftUIFont)
                 .lineLimit(1)
-                .foregroundStyle(isActive ? Color.white : Color.white.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
+                .foregroundStyle(isActive ? model.palette.activeText : model.palette.text.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
         }
         .frame(width: model.pillWidth(for: ws.label), height: CGFloat(a.pillSize))
         .scaleEffect(isTarget ? 1.08 : 1)
@@ -215,7 +215,7 @@ private struct WorkspaceGroup: View {
                 .font(.system(size: CGFloat(a.fontSize) * 1.05,
                               weight: isActive ? .heavy : .semibold,
                               design: .rounded))
-                .foregroundStyle(Color.white.opacity(isActive ? 1 : (isEmpty ? 0.35 : 0.6)))
+                .foregroundStyle(model.palette.text.opacity(isActive ? 1 : (isEmpty ? 0.35 : 0.6)))
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.trailing, shown.isEmpty ? 0 : 2)
@@ -224,13 +224,13 @@ private struct WorkspaceGroup: View {
                     .opacity(isActive || app.isFocused ? 1 : 0.8)
                     .overlay(alignment: .bottom) {
                         if model.multiWindowStyle == .dots && app.windowCount > 1 {
-                            WindowCountDots(count: app.windowCount, iconSize: iconSize)
+                            WindowCountDots(count: app.windowCount, iconSize: iconSize, color: model.palette.fill)
                                 .offset(y: max(3, iconSize * 0.2))
                         }
                     }
                     .overlay(alignment: .topTrailing) {
                         if let badge = model.badge(for: app) {
-                            BadgeView(label: badge, iconSize: iconSize)
+                            BadgeView(label: badge, iconSize: iconSize, palette: model.palette)
                                 .offset(x: iconSize * 0.18, y: -iconSize * 0.18)
                                 .transition(.scale.combined(with: .opacity))
                         }
@@ -240,7 +240,7 @@ private struct WorkspaceGroup: View {
             if hidden > 0 {
                 Text("+\(hidden)")
                     .font(.system(size: CGFloat(a.fontSize) * 0.8, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.6))
+                    .foregroundStyle(model.palette.text.opacity(0.6))
                     .fixedSize()
             }
         }
@@ -249,7 +249,7 @@ private struct WorkspaceGroup: View {
         .background {
             ActiveHighlight(model: model, ws: ws, ns: ns,
                             shape: AnyShape(RoundedRectangle(cornerRadius: (iconSize + 8) / 2.6, style: .continuous)),
-                            inactiveFill: Color.white.opacity(isEmpty ? 0 : 0.06))
+                            inactiveFill: model.palette.fill.opacity(isEmpty ? 0 : 0.06))
         }
         .scaleEffect(isTarget ? 1.06 : 1)
     }
@@ -260,12 +260,13 @@ private struct WorkspaceGroup: View {
 private struct WindowCountDots: View {
     let count: Int
     let iconSize: CGFloat
+    let color: Color
 
     var body: some View {
         let dot = max(2.5, iconSize * 0.14)
         HStack(spacing: dot * 0.7) {
             ForEach(0..<min(count, 3), id: \.self) { _ in
-                Circle().fill(Color.white.opacity(0.75)).frame(width: dot, height: dot)
+                Circle().fill(color.opacity(0.75)).frame(width: dot, height: dot)
             }
         }
     }
@@ -276,16 +277,17 @@ private struct WindowCountDots: View {
 private struct BadgeView: View {
     let label: String
     let iconSize: CGFloat
+    let palette: IslandPalette
 
     var body: some View {
         let short = label.count <= 2 && Int(label) != nil
         let size = max(8, iconSize * (short ? 0.55 : 0.4))
         ZStack {
-            Capsule().fill(Color(red: 1, green: 0.23, blue: 0.19))
+            Capsule().fill(palette.badge)
             if short {
                 Text(label)
                     .font(.system(size: size * 0.68, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(palette.badgeText)
                     .padding(.horizontal, size * 0.22)
             }
         }
@@ -304,7 +306,7 @@ struct EventHeader: View {
 
     var body: some View {
         let a = model.config.appearance
-        let secondary = Color(hex: a.secondaryTextColor, fallback: .gray)
+        let secondary = model.palette.secondary
         HStack(spacing: 12) {
             icon
             VStack(alignment: .leading, spacing: 2) {
@@ -376,16 +378,16 @@ struct FromToView: View {
 
     var body: some View {
         let a = model.config.appearance
-        let accent = Color(hex: a.accentColor, fallback: .blue)
+        let accent = model.palette.accent
         HStack(spacing: 6) {
             if let from {
-                pill(from.label, fill: Color.white.opacity(0.14))
+                pill(from.label, fill: model.palette.fill.opacity(0.14), text: model.palette.text)
                 Image(systemName: "arrow.right")
                     .font(.system(size: CGFloat(a.fontSize) * 0.85, weight: .bold))
                     .opacity(0.7)
                     .offset(x: arrived ? 0 : -6)
             }
-            pill(to.label, fill: accent)
+            pill(to.label, fill: accent, text: model.palette.activeText)
                 .scaleEffect(arrived ? 1 : 0.6)
                 .opacity(arrived ? 1 : 0)
         }
@@ -396,9 +398,10 @@ struct FromToView: View {
         }
     }
 
-    private func pill(_ label: String, fill: Color) -> some View {
+    private func pill(_ label: String, fill: Color, text: Color) -> some View {
         Text(label)
             .font(model.pillSwiftUIFont)
+            .foregroundStyle(text)
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(minWidth: CGFloat(model.config.appearance.pillSize),
@@ -479,11 +482,11 @@ struct EventProgressBar: View {
     @State private var remaining: CGFloat = 1
 
     var body: some View {
-        let accent = Color(hex: model.config.appearance.accentColor, fallback: .blue)
+        let color = model.palette.progress
         let duration = max(model.config.behavior.eventDurationMs, 100) / 1000
         GeometryReader { proxy in
             Capsule()
-                .fill(accent.opacity(0.85))
+                .fill(color.opacity(0.85))
                 .frame(width: proxy.size.width * remaining, height: 2)
                 .frame(maxWidth: .infinity)
         }

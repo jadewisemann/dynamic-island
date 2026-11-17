@@ -198,6 +198,16 @@ private struct GeneralSettings: View {
 private struct AppearanceSettings: View {
     @ObservedObject var model: SettingsModel
 
+    private var progressBinding: Binding<Color> {
+        Binding(
+            get: {
+                let a = model.draft.appearance
+                return Color(hex: a.progressColor.isEmpty ? a.accentColor : a.progressColor)
+            },
+            set: { model.draft.appearance.progressColor = $0.hexString(includeAlpha: false) }
+        )
+    }
+
     var body: some View {
         Form {
             Section("색상") {
@@ -207,6 +217,19 @@ private struct AppearanceSettings: View {
                 ColorRow(title: "강조색", hex: $model.draft.appearance.accentColor)
                 ColorRow(title: "글자", hex: $model.draft.appearance.textColor)
                 ColorRow(title: "보조 글자", hex: $model.draft.appearance.secondaryTextColor, supportsOpacity: true)
+                ColorRow(title: "활성 워크스페이스 글자", hex: $model.draft.appearance.activeTextColor)
+                ColorRow(title: "옅은 채움 (비활성 칸, 테두리)", hex: $model.draft.appearance.fillColor)
+                ColorRow(title: "알림 배지", hex: $model.draft.appearance.badgeColor)
+                ColorRow(title: "알림 배지 글자", hex: $model.draft.appearance.badgeTextColor)
+                LabeledContent("남은 시간 막대") {
+                    HStack {
+                        if !model.draft.appearance.progressColor.isEmpty {
+                            Button("강조색 사용") { model.draft.appearance.progressColor = "" }
+                                .buttonStyle(.link)
+                        }
+                        ColorPicker("", selection: progressBinding).labelsHidden()
+                    }
+                }
                 SliderRow(title: "테두리 밝기", value: $model.draft.appearance.borderOpacity,
                           range: 0...0.4, step: 0.02, decimals: 2)
                 Toggle("그림자", isOn: $model.draft.appearance.shadow)

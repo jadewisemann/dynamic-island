@@ -90,6 +90,16 @@ struct IslandConfig: Equatable {
         /// merge (one icon), dots (one icon with a dot per window, up to
         /// three) or separate (one icon per window).
         var multiWindowStyle = "dots"
+        /// Text on the highlighted (active) workspace pill.
+        var activeTextColor = "#FFFFFF"
+        /// Base color of inactive workspace backgrounds, window dots and the
+        /// border. Drawn at low opacity, so white suits dark themes and black
+        /// suits light ones.
+        var fillColor = "#FFFFFF"
+        var badgeColor = "#FF3B30"
+        var badgeTextColor = "#FFFFFF"
+        /// Remaining-time bar. Empty uses the accent color.
+        var progressColor = ""
     }
 
     struct AnimationConfig: Equatable {
@@ -171,6 +181,11 @@ extension IslandConfig {
         // Older files used a boolean; false meant "merge".
         if !a.bool("showWindowCount", true) { c.appearance.multiWindowStyle = "merge" }
         c.appearance.multiWindowStyle = a.string("multiWindowStyle", c.appearance.multiWindowStyle)
+        c.appearance.activeTextColor = a.string("activeTextColor", c.appearance.activeTextColor)
+        c.appearance.fillColor = a.string("fillColor", c.appearance.fillColor)
+        c.appearance.badgeColor = a.string("badgeColor", c.appearance.badgeColor)
+        c.appearance.badgeTextColor = a.string("badgeTextColor", c.appearance.badgeTextColor)
+        c.appearance.progressColor = a.string("progressColor", c.appearance.progressColor)
 
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
@@ -282,6 +297,15 @@ extension IslandConfig {
             "accentColor": \(q(a.accentColor)),
             "textColor": \(q(a.textColor)),
             "secondaryTextColor": \(q(a.secondaryTextColor)),
+            // 활성 워크스페이스 알약 위의 글자 색입니다.
+            "activeTextColor": \(q(a.activeTextColor)),
+            // 비활성 워크스페이스 배경, 창 개수 점, 테두리에 옅게 쓰는 기본 색입니다.
+            // 어두운 테마는 흰색, 밝은 테마는 검정이 어울립니다.
+            "fillColor": \(q(a.fillColor)),
+            "badgeColor": \(q(a.badgeColor)),
+            "badgeTextColor": \(q(a.badgeTextColor)),
+            // 남은 시간 막대 색입니다. 비워 두면 강조색을 씁니다.
+            "progressColor": \(q(a.progressColor)),
             "bottomCornerRadius": \(n(a.bottomCornerRadius)),
             "topCornerRadius": \(n(a.topCornerRadius)),
             "fontSize": \(n(a.fontSize)),

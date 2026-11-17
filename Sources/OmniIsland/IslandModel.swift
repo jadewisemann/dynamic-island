@@ -139,6 +139,8 @@ final class IslandModel: ObservableObject {
         return max(CGFloat(config.appearance.pillSize), ceil(text) + 14)
     }
 
+    var palette: IslandPalette { IslandPalette(config.appearance) }
+
     var usesAppStyle: Bool { config.appearance.workspaceStyle.lowercased() != "pills" }
 
     enum MultiWindowStyle { case merge, dots, separate }
@@ -266,5 +268,30 @@ final class IslandModel: ObservableObject {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + max(ms, 0) / 1000, execute: work)
         return work
+    }
+}
+
+/// Resolved colors for one appearance config. Views use these instead of
+/// fixed colors so light themes work.
+struct IslandPalette {
+    let text: Color
+    let secondary: Color
+    let accent: Color
+    let activeText: Color
+    /// Base for low-opacity fills (inactive workspaces, dots, border).
+    let fill: Color
+    let badge: Color
+    let badgeText: Color
+    let progress: Color
+
+    init(_ a: IslandConfig.Appearance) {
+        text = Color(hex: a.textColor, fallback: .white)
+        secondary = Color(hex: a.secondaryTextColor, fallback: .gray)
+        accent = Color(hex: a.accentColor, fallback: .blue)
+        activeText = Color(hex: a.activeTextColor, fallback: .white)
+        fill = Color(hex: a.fillColor, fallback: .white)
+        badge = Color(hex: a.badgeColor, fallback: Color(red: 1, green: 0.23, blue: 0.19))
+        badgeText = Color(hex: a.badgeTextColor, fallback: .white)
+        progress = a.progressColor.isEmpty ? accent : Color(hex: a.progressColor, fallback: accent)
     }
 }
