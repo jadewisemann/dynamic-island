@@ -1,0 +1,137 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags and commit count for the version
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+            version="${tag#v}"
+            version="${version:-0.0.0}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "OMNI_ISLAND_VERSION=$version" >> "$GITHUB_ENV"
+          echo "OMNI_ISLAND_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          P12="$RUNNER_TEMP/signing.p12"
+          if [[ -n "$MACOS_CERT_P12" ]]; then
+            echo "$MACOS_CERT_P12" | base64 --decode > "$P12"
+            CERT_PASSWORD="$MACOS_CERT_PASSWORD"
+          else
+            # No stored certificate: use a throwaway one so the signing path is
+            # still exercised. Such builds re-trigger permission prompts.
+            echo "::warning::MACOS_CERT_P12 secret is not set; signing with a throwaway certificate. Run scripts/create-signing-cert.sh once."
+            CERT_PASSWORD="throwaway"
+            printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=OmniIsland Signing\n[ext]\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' > "$RUNNER_TEMP/cert.cnf"
+            openssl req -x509 -newkey rsa:2048 -nodes -days 30 -config "$RUNNER_TEMP/cert.cnf" \
+              -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem"
+            LEGACY=""
+            if openssl version | grep -q '^OpenSSL 3'; then LEGACY="-legacy"; fi
+            openssl pkcs12 -export $LEGACY -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
+              -name "OmniIsland Signing" -out "$P12" -passout "pass:$CERT_PASSWORD"
+          fi
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$P12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -p codesigning "$KEYCHAIN"
+          echo "OMNI_ISLAND_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          rm -f "$P12" "$RUNNER_TEMP/key.pem"
+
+      - name: Bundle .app (release)
+        run: scripts/bundle.sh
+
+      - name: Verify signature
+        run: |
+          codesign --verify --strict --verbose=2 build/OmniIsland.app
+          codesign --display --requirements - build/OmniIsland.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' build/OmniIsland.app/Contents/Info.plist
+
+      - name: Zip app
+        run: |
+          cd build
+          ditto -c -k --keepParent OmniIsland.app OmniIsland.zip
+          shasum -a 256 OmniIsland.zip | tee OmniIsland.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OmniIsland-${{ steps.version.outputs.version }}
+          path: build/OmniIsland.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/OmniIsland.zip \
+            --title "OmniIsland $GITHUB_REF_NAME" --generate-notes
+
+  update-cask:
+    # Points the Homebrew cask in Casks/ at the new release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - name: Update cask
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "v$VERSION" --pattern OmniIsland.zip --dir "$RUNNER_TEMP"
+          SHA="$(sha256sum "$RUNNER_TEMP/OmniIsland.zip" | cut -d' ' -f1)"
+          sed -i -E \
+            -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+            -e "s/^  sha256 .*/  sha256 \"$SHA\"/" \
+            Casks/omni-island.rb
+          git diff
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Update omni-island cask to $VERSION" || exit 0
+          git push origin HEAD:main
