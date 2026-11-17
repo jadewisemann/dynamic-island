@@ -11,6 +11,8 @@ struct WorkspaceItem: Identifiable, Equatable {
     let isVisible: Bool
     /// Apps on this workspace in layout order, one entry per app.
     var apps: [WorkspaceApp] = []
+    /// Same as `apps`, but one entry per window (for the "separate" style).
+    var windows: [WorkspaceApp] = []
 }
 
 struct WorkspaceApp: Identifiable, Equatable {
@@ -119,6 +121,7 @@ final class WMStateTracker {
             return includeEmpty || (ws.counts?.total ?? 0) > 0
         }
         let appsByWorkspace = appsGroupedByWorkspace()
+        let windowsByWorkspace = windowsGroupedByWorkspace()
         return filtered.map { ws in
             WorkspaceItem(
                 id: ws.ref.key,
@@ -128,7 +131,8 @@ final class WMStateTracker {
                 displayName: ws.display?.name,
                 windowCount: ws.counts?.total ?? 0,
                 isVisible: ws.isVisible ?? false,
-                apps: appsByWorkspace[ws.ref.key] ?? []
+                apps: appsByWorkspace[ws.ref.key] ?? [],
+                windows: windowsByWorkspace[ws.ref.key] ?? []
             )
         }
     }
@@ -154,6 +158,36 @@ final class WMStateTracker {
                 ))
             }
             result[wsKey] = apps
+        }
+        return result
+    }
+
+    /// workspace key → one entry per window, in layout order. Windows of
+    /// the same app are kept next to each other so their icons stay grouped.
+    func windowsGroupedByWorkspace() -> [String: [WorkspaceApp]] {
+        var result: [String: [WorkspaceApp]] = [:]
+        var perApp: [String: Int] = [:]
+        for window in windows {
+            guard window.isScratchpad != true, let ws = window.workspace else { continue }
+            let name = window.app?.name ?? "?"
+            let bundleId = window.app?.bundleId
+            let appKey = (bundleId?.lowercased()).flatMap { $0.isEmpty ? nil : $0 } ?? name
+            let wsKey = ws.key
+            let counterKey = wsKey + "\u{1}" + appKey
+            let ordinal = perApp[counterKey, default: 0]
+            perApp[counterKey] = ordinal + 1
+            let entry = WorkspaceApp(
+                id: appKey + "#" + (window.id ?? String(ordinal)),
+                name: name, bundleId: bundleId,
+                windowCount: 1, isFocused: window.isFocused == true
+            )
+            var list = result[wsKey] ?? []
+            if let last = list.lastIndex(where: { $0.bundleId == bundleId && $0.name == name }) {
+                list.insert(entry, at: last + 1)
+            } else {
+                list.append(entry)
+            }
+            result[wsKey] = list
         }
         return result
     }

@@ -141,6 +141,21 @@ final class IslandModel: ObservableObject {
 
     var usesAppStyle: Bool { config.appearance.workspaceStyle.lowercased() != "pills" }
 
+    enum MultiWindowStyle { case merge, dots, separate }
+
+    var multiWindowStyle: MultiWindowStyle {
+        switch config.appearance.multiWindowStyle.lowercased() {
+        case "merge": return .merge
+        case "separate": return .separate
+        default: return .dots
+        }
+    }
+
+    /// Icons for one workspace group, following `multiWindowStyle`.
+    func displayedApps(for ws: WorkspaceItem) -> [WorkspaceApp] {
+        multiWindowStyle == .separate && !ws.windows.isEmpty ? ws.windows : ws.apps
+    }
+
     var maxAppsPerWorkspace: Int { max(1, Int(config.appearance.maxAppsPerWorkspace)) }
 
     static let appIconGap: CGFloat = 4
@@ -151,13 +166,14 @@ final class IslandModel: ObservableObject {
     func groupWidth(for ws: WorkspaceItem) -> CGFloat {
         let a = config.appearance
         let label = pillWidth(for: ws.label) - 8
-        let shown = min(ws.apps.count, maxAppsPerWorkspace)
+        let apps = displayedApps(for: ws)
+        let shown = min(apps.count, maxAppsPerWorkspace)
         var width = Self.groupPadding * 2 + label
         if shown > 0 {
             width += CGFloat(shown) * (CGFloat(a.appIconSize) + Self.appIconGap)
         }
-        if ws.apps.count > shown {
-            width += pillWidth(for: "+\(ws.apps.count - shown)") - 4
+        if apps.count > shown {
+            width += pillWidth(for: "+\(apps.count - shown)") - 4
         }
         return ceil(width)
     }

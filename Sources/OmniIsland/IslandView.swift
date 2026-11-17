@@ -205,8 +205,9 @@ private struct WorkspaceGroup: View {
         let isActive = ws.id == model.activeWorkspaceKey
         let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
         let iconSize = CGFloat(a.appIconSize)
-        let shown = Array(ws.apps.prefix(model.maxAppsPerWorkspace))
-        let hidden = ws.apps.count - shown.count
+        let apps = model.displayedApps(for: ws)
+        let shown = Array(apps.prefix(model.maxAppsPerWorkspace))
+        let hidden = apps.count - shown.count
         let isEmpty = ws.apps.isEmpty && ws.windowCount == 0
 
         HStack(spacing: IslandModel.appIconGap) {
@@ -222,7 +223,7 @@ private struct WorkspaceGroup: View {
                 AppIconView(app: app.appRef, size: iconSize)
                     .opacity(isActive || app.isFocused ? 1 : 0.8)
                     .overlay(alignment: .bottom) {
-                        if a.showWindowCount && app.windowCount > 1 {
+                        if model.multiWindowStyle == .dots && app.windowCount > 1 {
                             WindowCountDots(count: app.windowCount, iconSize: iconSize)
                                 .offset(y: max(3, iconSize * 0.2))
                         }

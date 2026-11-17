@@ -236,7 +236,11 @@ private struct AppearanceSettings: View {
                               range: 14...32, step: 1, unit: "pt")
                     SliderRow(title: "워크스페이스당 최대 아이콘", value: $model.draft.appearance.maxAppsPerWorkspace,
                               range: 1...12, step: 1, unit: "개")
-                    Toggle("창이 여러 개인 앱에 점 표시", isOn: $model.draft.appearance.showWindowCount)
+                    Picker("창이 여러 개인 앱", selection: $model.draft.appearance.multiWindowStyle) {
+                        Text("하나로 합치기").tag("merge")
+                        Text("점 표시").tag("dots")
+                        Text("창마다 아이콘").tag("separate")
+                    }
                     Toggle("알림 배지 표시", isOn: $model.draft.appearance.showBadges)
                     if model.draft.appearance.showBadges {
                         SliderRow(title: "배지 확인 간격", value: $model.draft.behavior.badgeIntervalMs,
