@@ -31,6 +31,21 @@ swift run OmniIsland --demo
 scripts/bundle.sh --install      # ~/Applications/OmniIsland.app
 ```
 
+### GitHub Actions 빌드 받아 쓰기
+
+`.github/workflows/build.yml`이 PR과 `main` 푸시마다 macOS 러너에서 빌드하고, `OmniIsland.zip`을 Actions 실행 결과의 아티팩트로 올립니다. `v0.1.0`처럼 `v`로 시작하는 태그를 푸시하면 같은 zip을 GitHub Release에도 첨부합니다.
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0   # 릴리스 만들기
+```
+
+내려받은 앱은 ad-hoc 서명만 되어 있으므로, 압축을 푼 뒤 격리 속성을 지워야 실행됩니다.
+
+```bash
+xattr -dr com.apple.quarantine OmniIsland.app
+mv OmniIsland.app ~/Applications/ && open ~/Applications/OmniIsland.app
+```
+
 처음 실행하면 **손쉬운 사용(Accessibility)** 권한을 요청합니다. 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 OmniIsland를 켜 주세요.
 
 - 권한이 없어도 동작은 합니다. 이 경우 Option 키 상태를 초당 40회 읽는 방식으로 대신 감지하고, 권한이 허용되면 자동으로 이벤트 기반 감지로 바뀝니다.
@@ -103,6 +118,6 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 
 ## 프로토타입의 한계
 
-- 이 코드는 클라우드 환경에서 macOS SDK 없이 작성했으므로 아직 실제 기기에서 검증하지 못했습니다. 빌드 오류가 나면 알려 주세요.
+- GitHub Actions(macOS 15, Xcode 16.4)에서 컴파일은 확인했지만, 실제 OmniWM과 함께 동작하는지는 아직 확인하지 못했습니다.
 - 워크스페이스 목록은 현재 활성 모니터의 워크스페이스만 보여 줍니다.
 - 아일랜드는 클릭할 수 없습니다. 클릭해서 워크스페이스를 전환하는 기능은 다음 단계 후보입니다.
