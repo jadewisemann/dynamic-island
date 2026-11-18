@@ -1003,7 +1003,7 @@ private struct NotificationSettings: View {
                         }
                     }
                 }
-                Toggle("macOS 기본 배너 닫기", isOn: $model.draft.notifications.dismissSystemBanner)
+                Toggle("macOS 기본 배너 닫기 (아일랜드에 띄운 뒤 바로 닫음)", isOn: $model.draft.notifications.dismissSystemBanner)
                 Toggle("놓친 알림을 노치 옆에 표시", isOn: $model.draft.notifications.keepIndicator)
                 if model.draft.notifications.keepIndicator {
                     SliderRow(title: "표시 유지 시간", value: $model.draft.notifications.indicatorTimeoutMin,
@@ -1012,7 +1012,7 @@ private struct NotificationSettings: View {
             } header: {
                 Text("알림 카드")
             } footer: {
-                Text("macOS 알림 배너에 보이는 내용을 손쉬운 사용 API로 읽어 옵니다. 데이터베이스 읽기를 켜고 전체 디스크 접근 권한을 주면 배너가 뜨지 않는 알림(집중 모드, 알림 스타일 \"없음\")도 1~2초 늦게 보여 줍니다. 두 경로로 들어온 같은 알림은 한 번만 보여 줍니다. 기본 배너를 닫는 옵션을 켜도 배너가 잠깐 보였다가 사라집니다.")
+                Text("macOS 알림 배너에 보이는 내용을 손쉬운 사용 API로 읽어 옵니다. 데이터베이스 읽기를 켜고 전체 디스크 접근 권한을 주면 배너가 뜨지 않는 알림(집중 모드, 알림 스타일 \"없음\")도 1~2초 늦게 보여 줍니다. 두 경로로 들어온 같은 알림은 한 번만 보여 줍니다. 기본 배너를 닫는 옵션을 켜도 배너가 잠깐 보였다가 사라집니다. 오른쪽 배너가 아예 뜨지 않게 하려면 데이터베이스 읽기를 켜 둔 채 시스템 설정 → 알림에서 앱별 알림 스타일을 \"없음\"으로 바꾸세요. 알림은 알림 센터와 아일랜드에 그대로 들어옵니다. 지난 알림은 대시보드와 메뉴 막대의 \"최근 알림\"에서 다시 볼 수 있습니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

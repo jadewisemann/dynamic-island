@@ -111,12 +111,14 @@ struct IslandView: View {
                 NotificationCard(model: model, notification: n)
                     .frame(height: IslandModel.notificationCardHeight)
                     .padding(.horizontal, 16)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.open(n) }
                     .id(n.id)
                     .transition(fade)
             }
             if model.phase == .dashboard {
                 DashboardView(model: model)
-                    .frame(height: IslandModel.dashboardHeight)
+                    .frame(height: model.dashboardHeight)
                     .padding(.horizontal, max(model.contentPadding, 16))
                     .transition(fade)
             }
@@ -511,6 +513,8 @@ private struct WorkspacePill: View {
                 .foregroundStyle(isActive ? activeColor : model.palette.text.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
         }
         .frame(width: model.pillWidth(for: label), height: CGFloat(a.pillSize))
+        .contentShape(Capsule())
+        .onTapGesture { model.focus(ws) }
         .scaleEffect(isTarget ? 1.08 : 1)
     }
 }
@@ -534,8 +538,9 @@ private struct WorkspaceGroup: View {
 
         HStack(spacing: IslandModel.appIconGap) {
             labelText(isActive: isActive, isEmpty: isEmpty, hasIcons: !shown.isEmpty)
-            ForEach(shown) { app in
-                icon(app, isActive: isActive, size: iconSize)
+            ForEach(Array(shown.enumerated()), id: \.element.id) { index, app in
+                let startsFloating = index > 0 && app.isFloating && !shown[index - 1].isFloating
+                iconCell(app, startsFloating: startsFloating, isActive: isActive, size: iconSize)
             }
             if hidden > 0 {
                 overflowText(hidden)
@@ -558,6 +563,8 @@ private struct WorkspaceGroup: View {
             .lineLimit(1)
             .fixedSize()
             .padding(.trailing, hasIcons ? 2 : 0)
+            .contentShape(Rectangle())
+            .onTapGesture { model.focus(ws) }
     }
 
     private func overflowText(_ count: Int) -> some View {
@@ -567,13 +574,27 @@ private struct WorkspaceGroup: View {
             .fixedSize()
     }
 
+    @ViewBuilder
+    private func iconCell(_ app: WorkspaceApp, startsFloating: Bool, isActive: Bool, size: CGFloat) -> some View {
+        if startsFloating {
+            FloatingSeparator(iconSize: size, color: model.palette.fill)
+        }
+        icon(app, isActive: isActive, size: size)
+            .contentShape(Rectangle())
+            .onTapGesture { model.activate(app, in: ws) }
+    }
+
     private func icon(_ app: WorkspaceApp, isActive: Bool, size: CGFloat) -> some View {
         let showDots = model.multiWindowStyle == .dots && app.windowCount > 1
         let badge = model.badge(for: app)
         let highlighted = model.config.appearance.highlightFocusedWindow && app.isFocused
-        return AppIconView(app: app.appRef, size: size)
+        return AppIconView(app: app.appRef, size: size * (app.isFloating ? 0.86 : 1))
+            .frame(width: size, height: size)
             .opacity(isActive || app.isFocused ? 1 : 0.8)
             .background {
+                if app.isFloating && !highlighted {
+                    FloatingFrame(iconSize: size, color: model.palette.fill)
+                }
                 if highlighted {
                     FocusRing(iconSize: size, color: model.palette.accent)
                         .matchedGeometryEffect(id: "focused-window", in: ns)
@@ -599,6 +620,32 @@ private struct WorkspaceGroup: View {
         let shape = AnyShape(RoundedRectangle(cornerRadius: (iconSize + 8) / 2.6, style: .continuous))
         return ActiveHighlight(model: model, ws: ws, ns: ns, shape: shape,
                                inactiveFill: model.palette.fill.opacity(isEmpty ? 0 : 0.06))
+    }
+}
+
+/// Thin vertical rule between tiled and floating icons.
+private struct FloatingSeparator: View {
+    let iconSize: CGFloat
+    let color: Color
+
+    var body: some View {
+        Capsule()
+            .fill(color.opacity(0.35))
+            .frame(width: IslandModel.floatingSeparatorWidth, height: iconSize * 0.7)
+    }
+}
+
+/// Dashed outline around a floating window's icon, so it reads as lifted
+/// off the tiling layout.
+private struct FloatingFrame: View {
+    let iconSize: CGFloat
+    let color: Color
+
+    var body: some View {
+        let pad: CGFloat = 1.5
+        RoundedRectangle(cornerRadius: (iconSize + pad * 2) * 0.28, style: .continuous)
+            .stroke(color.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [2.5, 2]))
+            .padding(-pad)
     }
 }
 

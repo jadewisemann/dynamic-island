@@ -13,6 +13,8 @@ struct WorkspaceItem: Identifiable, Equatable {
     var apps: [WorkspaceApp] = []
     /// Same as `apps`, but one entry per window (for the "separate" style).
     var windows: [WorkspaceApp] = []
+    /// OmniWM's raw workspace name, for `workspace focus-name`.
+    var rawName: String? = nil
 }
 
 struct WorkspaceApp: Identifiable, Equatable {
@@ -22,8 +24,15 @@ struct WorkspaceApp: Identifiable, Equatable {
     let bundleId: String?
     var windowCount: Int
     var isFocused: Bool
+    /// Floating windows are grouped apart from tiled ones.
+    var isFloating: Bool = false
+    /// OmniWM window ids, in layout order.
+    var windowIds: [String] = []
+    /// The window to bring forward when the icon is clicked.
+    var focusedWindowId: String?
 
     var appRef: AppRef { AppRef(name: name, bundleId: bundleId) }
+    var targetWindowId: String? { focusedWindowId ?? windowIds.first }
 }
 
 /// Something that actually happened and deserves an expanded island.
@@ -149,7 +158,8 @@ final class WMStateTracker {
                 windowCount: ws.counts?.total ?? 0,
                 isVisible: ws.isVisible ?? false,
                 apps: appsByWorkspace[ws.ref.key] ?? [],
-                windows: windowsByWorkspace[ws.ref.key] ?? []
+                windows: windowsByWorkspace[ws.ref.key] ?? [],
+                rawName: ws.rawName
             )
         }
     }
@@ -162,21 +172,35 @@ final class WMStateTracker {
             guard window.isScratchpad != true, let ws = window.workspace else { continue }
             let name = window.app?.name ?? "?"
             let bundleId = window.app?.bundleId
-            let appKey = (bundleId?.lowercased()).flatMap { $0.isEmpty ? nil : $0 } ?? name
+            let floating = window.isFloating
+            let appKey = ((bundleId?.lowercased()).flatMap { $0.isEmpty ? nil : $0 } ?? name)
+                + (floating ? "~float" : "")
             let wsKey = ws.key
+            let focused = isFocused(window)
             var apps = result[wsKey] ?? []
             if let index = apps.firstIndex(where: { $0.id == appKey }) {
                 apps[index].windowCount += 1
-                if isFocused(window) { apps[index].isFocused = true }
+                if let id = window.id { apps[index].windowIds.append(id) }
+                if focused {
+                    apps[index].isFocused = true
+                    apps[index].focusedWindowId = window.id
+                }
             } else {
                 apps.append(WorkspaceApp(
                     id: appKey, name: name, bundleId: bundleId,
-                    windowCount: 1, isFocused: isFocused(window)
+                    windowCount: 1, isFocused: focused, isFloating: floating,
+                    windowIds: window.id.map { [$0] } ?? [],
+                    focusedWindowId: focused ? window.id : nil
                 ))
             }
             result[wsKey] = apps
         }
-        return result
+        return result.mapValues(Self.tiledFirst)
+    }
+
+    /// Tiled windows in layout order, then the floating ones.
+    private static func tiledFirst(_ apps: [WorkspaceApp]) -> [WorkspaceApp] {
+        apps.filter { !$0.isFloating } + apps.filter(\.isFloating)
     }
 
     /// workspace key → one entry per window, in layout order. Windows of
@@ -188,25 +212,32 @@ final class WMStateTracker {
             guard window.isScratchpad != true, let ws = window.workspace else { continue }
             let name = window.app?.name ?? "?"
             let bundleId = window.app?.bundleId
-            let appKey = (bundleId?.lowercased()).flatMap { $0.isEmpty ? nil : $0 } ?? name
+            let floating = window.isFloating
+            let appKey = ((bundleId?.lowercased()).flatMap { $0.isEmpty ? nil : $0 } ?? name)
+                + (floating ? "~float" : "")
             let wsKey = ws.key
             let counterKey = wsKey + "\u{1}" + appKey
             let ordinal = perApp[counterKey, default: 0]
             perApp[counterKey] = ordinal + 1
+            let focused = isFocused(window)
             let entry = WorkspaceApp(
                 id: appKey + "#" + (window.id ?? String(ordinal)),
                 name: name, bundleId: bundleId,
-                windowCount: 1, isFocused: isFocused(window)
+                windowCount: 1, isFocused: focused, isFloating: floating,
+                windowIds: window.id.map { [$0] } ?? [],
+                focusedWindowId: focused ? window.id : nil
             )
             var list = result[wsKey] ?? []
-            if let last = list.lastIndex(where: { $0.bundleId == bundleId && $0.name == name }) {
+            if let last = list.lastIndex(where: {
+                $0.bundleId == bundleId && $0.name == name && $0.isFloating == floating
+            }) {
                 list.insert(entry, at: last + 1)
             } else {
                 list.append(entry)
             }
             result[wsKey] = list
         }
-        return result
+        return result.mapValues(Self.tiledFirst)
     }
 
     /// Bundle ids of every managed app, for the Dock badge reader.

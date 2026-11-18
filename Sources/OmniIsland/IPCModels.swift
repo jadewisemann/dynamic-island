@@ -81,6 +81,11 @@ struct WindowSnapshot: Decodable, Equatable {
     let title: String?
     let isFocused: Bool?
     let isScratchpad: Bool?
+    /// "tiling" or "floating".
+    let mode: String?
+    let pid: Int?
+
+    var isFloating: Bool { mode?.lowercased() == "floating" }
 }
 
 /// Channel `layout-changed` → result kind `workspaces`.
