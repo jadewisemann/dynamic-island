@@ -8,8 +8,8 @@
 # Both channels install the same OmniIsland.app with the same signature, so
 # switching keeps the Accessibility permission and ~/.config/omni-island.
 cask "omni-island@nightly" do
-  version "0.7.0-nightly.60"
-  sha256 "20d5c8f41fff917901d802a410c7903f26cf925e62a17a6c169411ee1df0eca5"
+  version "0.8.0-nightly.64"
+  sha256 "22fdc75f236594ec574dd7c3759fa713d9bdd76c2c3dca07b3d3a7f67d44997d"
 
   url "https://github.com/jadewisemann/dynamic-island/releases/download/nightly/OmniIsland-#{version}.zip"
   name "OmniIsland Nightly"
