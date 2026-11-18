@@ -36,6 +36,9 @@ struct IslandConfig: Equatable {
         /// When true, the island only appears when the modifier is pressed on
         /// its own (no other modifier held at the same time).
         var exactMatch = true
+        /// With exactMatch, still show the island while Shift is held too,
+        /// so OmniWM shortcuts like Option+Shift+number keep it visible.
+        var allowShift = true
     }
 
     struct Behavior: Equatable {
@@ -511,6 +514,7 @@ extension IslandConfig {
         c.trigger.holdDelayMs = t.number("holdDelayMs", c.trigger.holdDelayMs)
         c.trigger.hideDelayMs = t.number("hideDelayMs", c.trigger.hideDelayMs)
         c.trigger.exactMatch = t.bool("exactMatch", c.trigger.exactMatch)
+        c.trigger.allowShift = t.bool("allowShift", c.trigger.allowShift)
 
         let b = r.sub("behavior")
         c.behavior.showEventsWithoutModifier = b.bool("showEventsWithoutModifier", c.behavior.showEventsWithoutModifier)
@@ -801,6 +805,8 @@ extension IslandConfig {
             "hideDelayMs": \(n(t.hideDelayMs)),
             // true면 다른 modifier 없이 이 키만 눌렀을 때만 나타납니다.
             "exactMatch": \(b(t.exactMatch)),
+            // exactMatch가 true여도 Shift를 함께 누른 상태(Option+Shift 등)에서는 보여 줍니다.
+            "allowShift": \(b(t.allowShift)),
           },
 
           "behavior": {

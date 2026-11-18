@@ -42,10 +42,12 @@ struct LiquidIslandGeometry {
         }
     }
 
-    /// True while a panel is between tucked in and fully out.
+    /// True while a panel is on its way, including a spring's overshoot
+    /// past fully out. The gooey layer stays on for all of it, so it never
+    /// switches on and off mid-animation.
     var isMoving: Bool {
-        let l = leftProgress, r = rightProgress
-        return (l > 0.001 && l < 0.999) || (r > 0.001 && r < 0.999)
+        func resting(_ p: CGFloat) -> Bool { abs(p) < 0.0005 || abs(p - 1) < 0.0005 }
+        return !resting(leftProgress) || !resting(rightProgress)
     }
 
     private var shape: NotchShape {
@@ -72,6 +74,28 @@ struct LiquidIslandGeometry {
             right = CGRect(x: size.width - w, y: 0, width: w, height: dropHeight(rp, total: size.height))
         }
         return (left, center, right)
+    }
+
+    /// Simplified bodies for the gooey layer: the outline without the
+    /// concave top shoulders (which the blur would fill in and make bulge),
+    /// pulled in by a point so the gooey edge never shows past the crisp one,
+    /// and run up past the top edge so the blur does not eat it.
+    func gooBodies(in size: CGSize) -> [Path] {
+        let r = rects(in: size)
+        return [r.left, r.center, r.right].compactMap { $0 }.map { rect in
+            let w = rect.width, h = rect.height
+            let convex = max(0, min(topConvexRadius, w / 2, h / 2))
+            if convex > 0 {
+                let body = rect.insetBy(dx: 1, dy: 1)
+                return Path(roundedRect: body, cornerRadius: max(convex - 1, 0), style: .continuous)
+            }
+            let top = max(0, min(topRadius, w / 4, h / 2))
+            let body = CGRect(x: rect.minX + top + 1, y: rect.minY - islandGooBlur * 3,
+                              width: max(w - 2 * top - 2, 0), height: h + islandGooBlur * 3 - 1)
+            let bottom = max(0, min(bottomRadius - 1, body.width / 2, h / 2))
+            return Path(roundedRect: body, cornerRadii: RectangleCornerRadii(
+                topLeading: 0, bottomLeading: bottom, bottomTrailing: bottom, topTrailing: 0))
+        }
     }
 
     /// The island and the panels as separate outlines.
@@ -126,7 +150,7 @@ struct LiquidIslandMask: ViewModifier, Animatable {
                         goo.addFilter(.alphaThreshold(min: 0.5, color: .black))
                         goo.addFilter(.blur(radius: islandGooBlur))
                         goo.drawLayer { layer in
-                            for path in g.blobs(in: size) + g.necks(in: size) {
+                            for path in g.gooBodies(in: size) + g.necks(in: size) {
                                 layer.fill(path, with: .color(.black))
                             }
                         }

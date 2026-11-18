@@ -127,6 +127,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `trigger.holdDelayMs` | `120` | 이 시간 이상 누르고 있어야 나타납니다. Option으로 특수 문자를 입력할 때 깜빡이는 것을 줄여 줍니다. |
 | `trigger.hideDelayMs` | `160` | 키를 뗀 뒤 사라질 때까지의 시간입니다. |
 | `trigger.exactMatch` | `true` | 다른 modifier가 함께 눌려 있으면 나타나지 않습니다. |
+| `trigger.allowShift` | `true` | `exactMatch`가 켜져 있어도 Shift는 함께 눌러도 됩니다. Option+Shift+숫자처럼 OmniWM 단축키를 누르는 중에도 아일랜드가 보입니다. |
 | `behavior.showEventsWithoutModifier` | `true` | 키를 누르지 않았을 때 일어난 이동도 펼쳐서 보여 줍니다. |
 | `behavior.eventDurationMs` | `1700` | 펼쳐진 상태가 유지되는 시간입니다. |
 | `behavior.showWorkspaceSwitch` / `showWindowMove` | `true` | 이벤트 종류별로 켜고 끕니다. |

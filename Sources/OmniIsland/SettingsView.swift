@@ -336,6 +336,9 @@ private struct GeneralSettings: View {
                     }
                 }
                 Toggle("이 키만 눌렀을 때만 표시", isOn: $model.draft.trigger.exactMatch)
+                if model.draft.trigger.exactMatch {
+                    Toggle("Shift를 함께 눌러도 표시 (Option+Shift 단축키 중에도)", isOn: $model.draft.trigger.allowShift)
+                }
                 SliderRow(title: "누르고 있어야 하는 시간", value: $model.draft.trigger.holdDelayMs,
                           range: 0...600, step: 10, unit: "ms")
                 SliderRow(title: "키를 뗀 뒤 사라지기까지", value: $model.draft.trigger.hideDelayMs,
