@@ -19,6 +19,8 @@ env:
   # Tag of the release this run publishes, or empty for a plain build.
   # Either a pushed v* tag, or a manual run with the "release" input.
   RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || (inputs.release != '' && format('v{0}', inputs.release) || '') }}
+  # True for a push to main: that build is published to the nightly channel.
+  NIGHTLY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 concurrency:
   # Release runs get their own group so the cask commit they push to main
@@ -31,6 +33,7 @@ jobs:
     runs-on: macos-15
     outputs:
       version: ${{ steps.version.outputs.version }}
+      nightly_version: ${{ steps.version.outputs.nightly_version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -52,9 +55,15 @@ jobs:
             version="${tag#v}"
             version="${version:-0.0.0}"
           fi
+          build="$(git rev-list --count HEAD)"
+          if [[ "$NIGHTLY" == "true" ]]; then
+            # Nightly builds show e.g. 0.5.0-nightly.123 in the menu and cask.
+            version="$version-nightly.$build"
+            echo "nightly_version=$version" >> "$GITHUB_OUTPUT"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "OMNI_ISLAND_VERSION=$version" >> "$GITHUB_ENV"
-          echo "OMNI_ISLAND_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+          echo "OMNI_ISLAND_BUILD=$build" >> "$GITHUB_ENV"
 
       - name: Build (debug)
         run: swift build
@@ -122,6 +131,26 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "OmniIsland $RELEASE_TAG" --generate-notes
 
+      - name: Publish nightly
+        if: env.NIGHTLY == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.nightly_version }}
+        run: |
+          # One rolling prerelease under the "nightly" tag. Each build adds a
+          # zip named after its version, so the cask URL of the previous build
+          # keeps working until the cask points at the new one.
+          git tag -f nightly "$GITHUB_SHA"
+          git push -f origin refs/tags/nightly
+          if ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly --prerelease --latest=false \
+              --title "OmniIsland nightly" --notes "Build of the latest main."
+          fi
+          cp build/OmniIsland.zip "build/OmniIsland-$VERSION.zip"
+          gh release upload nightly "build/OmniIsland-$VERSION.zip" --clobber
+          gh release edit nightly --prerelease --latest=false \
+            --notes "Build of main at $GITHUB_SHA (version $VERSION)."
+
   update-cask:
     # Points the Homebrew cask in Casks/ at the new release.
     if: needs.build.outputs.version != '' && (startsWith(github.ref, 'refs/tags/v') || inputs.release != '')
@@ -146,4 +175,50 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Update omni-island cask to $VERSION" || exit 0
-          git push origin HEAD:main
+          for i in 1 2 3 4; do
+            git push origin HEAD:main && exit 0
+            git pull --rebase origin main
+          done
+          exit 1
+
+  update-nightly-cask:
+    # Points Casks/omni-island@nightly.rb at the nightly build of this push.
+    if: needs.build.outputs.nightly_version != ''
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - name: Update cask
+        env:
+          VERSION: ${{ needs.build.outputs.nightly_version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CASK="Casks/omni-island@nightly.rb"
+          gh release download nightly --pattern "OmniIsland-$VERSION.zip" --dir "$RUNNER_TEMP"
+          SHA="$(sha256sum "$RUNNER_TEMP/OmniIsland-$VERSION.zip" | cut -d' ' -f1)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4; do
+            # A newer nightly may already be in the cask; never go backwards.
+            current="$(sed -n -E 's/^  version "(.*)"/\1/p' "$CASK")"
+            if [[ "${current##*.}" =~ ^[0-9]+$ && "${current##*.}" -gt "${VERSION##*.}" ]]; then
+              echo "cask already at $current"; exit 0
+            fi
+            sed -i -E \
+              -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+              -e "s/^  sha256 .*/  sha256 \"$SHA\"/" \
+              "$CASK"
+            git diff
+            git commit -am "Update omni-island@nightly cask to $VERSION" || exit 0
+            git push origin HEAD:main && break
+            git reset -q --hard HEAD~1
+            git pull -q --rebase origin main
+            [[ $i == 4 ]] && exit 1
+          done
+          # Keep only the five newest nightly zips.
+          gh release view nightly --json assets --jq '.assets[].name' \
+            | grep -E '^OmniIsland-.*-nightly\.[0-9]+\.zip$' \
+            | sort -t. -k4,4n | head -n -5 \
+            | while read -r old; do gh release delete-asset nightly "$old" --yes; done

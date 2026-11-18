@@ -12,6 +12,7 @@ cask "omni-island" do
   desc "Dynamic-island style workspace indicator for the OmniWM tiling window manager"
   homepage "https://github.com/jadewisemann/dynamic-island"
 
+  conflicts_with cask: "omni-island@nightly"
   depends_on macos: ">= :sonoma"
 
   app "OmniIsland.app"

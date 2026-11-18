@@ -28,6 +28,25 @@ brew upgrade --cask omni-island     # 새 버전이 나오면 같은 자리에 �
 - 앱은 Apple 공증을 받지 않았으므로, cask가 설치 직후 격리 속성(`com.apple.quarantine`)을 지우고 앱을 실행합니다.
 - 앱 버전은 태그에서, 빌드 번호는 커밋 수에서 정해집니다. 메뉴 막대 메뉴 맨 위에서 확인할 수 있습니다.
 
+### nightly 채널
+
+`main`에 커밋이 올라올 때마다 GitHub Actions가 앱을 빌드해서 `nightly` 프리릴리스에 올리고, `omni-island@nightly` cask의 버전과 해시를 갱신합니다. 버전은 `0.5.0-nightly.123`처럼 마지막 태그 뒤에 커밋 수가 붙는 형태입니다.
+
+```bash
+# 안정 버전 → nightly
+brew uninstall --cask omni-island && brew install --cask omni-island@nightly
+
+# nightly → 안정 버전
+brew uninstall --cask omni-island@nightly && brew install --cask omni-island
+
+# nightly 최신으로 올리기
+brew update && brew upgrade --cask omni-island@nightly
+```
+
+- 두 cask는 같은 `/Applications/OmniIsland.app`을 설치하므로 동시에 설치할 수 없습니다. 그래서 먼저 지우고 설치합니다.
+- 두 채널 모두 같은 인증서로 서명하므로, 전환해도 손쉬운 사용 권한과 `~/.config/omni-island` 설정은 그대로 유지됩니다. (`--zap`을 붙이면 설정이 지워지니 주의하세요.)
+- `nightly` 릴리스에는 최근 빌드 5개만 남겨 둡니다.
+
 ### 권한이 매번 초기화되지 않게 하기 (한 번만 설정)
 
 macOS는 손쉬운 사용 권한을 앱의 **서명**에 묶어서 기억합니다. 서명이 빌드마다 달라지면(ad-hoc 서명) 업데이트할 때마다 권한을 다시 줘야 합니다. 모든 빌드를 같은 인증서로 서명하면 권한이 그대로 유지됩니다.
