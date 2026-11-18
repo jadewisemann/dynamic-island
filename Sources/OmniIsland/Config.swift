@@ -20,6 +20,7 @@ struct IslandConfig: Equatable {
     var dashboard = Dashboard()
     var launcher = Launcher()
     var agents = Agents()
+    var shelf = Shelf()
     // JSON key "animation"; named `motion` in Swift because `Binding.animation(_:)` would shadow it.
     var motion = AnimationConfig()
 
@@ -274,6 +275,19 @@ struct IslandConfig: Equatable {
     }
 
     /// Coding agents (Claude Code, Codex) reporting through `omni-island hook`.
+    /// Clipboard shelf: copies are kept and offered in the launcher.
+    struct Shelf: Equatable {
+        var enabled = true
+        var maxItems = 30.0
+        /// Shelf rows under the recent apps when the query is empty.
+        var launcherCount = 4.0
+        var captureImages = true
+        var captureFiles = true
+        /// Bundle ids or app names whose copies are never kept (password
+        /// managers are always skipped).
+        var ignoreApps: [String] = []
+    }
+
     struct Agents: Equatable {
         var enabled = true
         /// Permission requests get allow / deny buttons on the island.
@@ -616,6 +630,14 @@ extension IslandConfig {
         c.launcher.askGrok = la.bool("askGrok", c.launcher.askGrok)
         c.launcher.searchX = la.bool("searchX", c.launcher.searchX)
 
+        let sh = r.sub("shelf")
+        c.shelf.enabled = sh.bool("enabled", c.shelf.enabled)
+        c.shelf.maxItems = sh.number("maxItems", c.shelf.maxItems)
+        c.shelf.launcherCount = sh.number("launcherCount", c.shelf.launcherCount)
+        c.shelf.captureImages = sh.bool("captureImages", c.shelf.captureImages)
+        c.shelf.captureFiles = sh.bool("captureFiles", c.shelf.captureFiles)
+        c.shelf.ignoreApps = sh.strings("ignoreApps", c.shelf.ignoreApps)
+
         let ag = r.sub("agents")
         c.agents.enabled = ag.bool("enabled", c.agents.enabled)
         c.agents.approvals = ag.bool("approvals", c.agents.approvals)
@@ -755,7 +777,7 @@ extension IslandConfig {
         let q = Self.quote, n = Self.number
         func b(_ v: Bool) -> String { v ? "true" : "false" }
         let t = trigger, be = behavior, a = appearance, an = motion, th = theme, l = layout, w = widgets
-        let no = notifications, ca = calendar, d = dashboard, la = launcher, ag = agents
+        let no = notifications, ca = calendar, d = dashboard, la = launcher, ag = agents, sh = shelf
         func list(_ values: [String]) -> String { "[" + values.map { q($0) }.joined(separator: ", ") + "]" }
         func numberList(_ values: [Double]) -> String { "[" + values.map { n($0) }.joined(separator: ", ") + "]" }
         let saved = th.saved.map { "      " + Self.savedThemeLine($0) + "," }.joined(separator: "\n")
@@ -964,6 +986,18 @@ extension IslandConfig {
             "askGrok": \(b(la.askGrok)),
             "searchX": \(b(la.searchX)),
             "width": \(n(la.width)),
+          },
+
+          "shelf": {
+            // 복사한 텍스트, 이미지, 파일을 기억해서 런처(⌥H)에서 다시 꺼냅니다.
+            // 검색어 없이 열면 최근 항목이, "선반"을 입력하면 전체가 보입니다.
+            "enabled": \(b(sh.enabled)),
+            "maxItems": \(n(sh.maxItems)),
+            "launcherCount": \(n(sh.launcherCount)),
+            "captureImages": \(b(sh.captureImages)),
+            "captureFiles": \(b(sh.captureFiles)),
+            // 여기 적은 앱(번들 ID나 이름)에서 복사한 것은 담지 않습니다. 비밀번호 관리자는 항상 뺍니다.
+            "ignoreApps": \(list(sh.ignoreApps)),
           },
 
           "agents": {

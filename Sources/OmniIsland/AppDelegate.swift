@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let deduplicator = NotificationDeduplicator()
     private let socketServer = IslandSocketServer()
     private let agents = AgentMonitor()
+    private let shelf = ClipboardShelf()
     private var windowController: IslandWindowController?
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
@@ -197,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureBadges(config)
         configureWidgets(config)
         configureLauncher(config)
+        configureShelf(config)
         agents.config = config.agents
         windowController?.reposition()
         if previous.omniwmctlPath != config.omniwmctlPath || previous.socketPath != config.socketPath {
@@ -331,9 +333,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.runWindowCommand(["window", "navigate", window.id], fallbackBundleId: window.bundleId)
         }
         launcher.onOpenSettings = { [weak self] in self?.showSettings() }
+        launcher.shelfProvider = { [weak self] in
+            guard let self, self.configStore.config.shelf.enabled else { return [] }
+            return self.shelf.items
+        }
+        launcher.onCopyShelf = { [weak self] item in self?.shelf.copy(item) }
+        launcher.onPasteShelf = { [weak self] item in self?.shelf.paste(item) }
+        launcher.onRemoveShelf = { [weak self] item in self?.shelf.remove(item) }
+        launcher.shelfDragProvider = { [weak self] item in self?.shelf.itemProvider(item) ?? NSItemProvider() }
+        configureShelf(configStore.config)
         launcher.onSummonWindow = { [weak self] window in
             self?.runWindowCommand(["window", "summon-right", window.id], fallbackBundleId: window.bundleId)
         }
+    }
+
+    private func configureShelf(_ config: IslandConfig) {
+        let s = config.shelf
+        shelf.configure(.init(enabled: s.enabled && !isDemo, maxItems: Int(s.maxItems.rounded()),
+                              captureImages: s.captureImages, captureFiles: s.captureFiles,
+                              ignoreApps: s.ignoreApps))
+        model.launcher.shelfCount = s.enabled ? Int(s.launcherCount.rounded()) : 0
+    }
+
+    @objc private func clearShelf() {
+        shelf.clear()
     }
 
     private func configureLauncher(_ config: IslandConfig) {
@@ -539,6 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recentMenu = NSMenu()
         recent.submenu = recentMenu
         menu.addItem(recent)
+        menu.addItem(makeItem("선반 비우기", #selector(clearShelf), ""))
         let hooks = makeItem("Claude Code 훅 설치", #selector(toggleClaudeHooks), "")
         hooks.state = ClaudeHookInstaller.isInstalled() ? .on : .off
         menu.addItem(hooks)

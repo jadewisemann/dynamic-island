@@ -1226,6 +1226,19 @@ private struct LauncherSettings: View {
                           range: 400...800, step: 10, unit: "pt")
             }
             .disabled(!model.draft.launcher.enabled)
+
+            Section("선반") {
+                Toggle("복사한 것을 선반에 모으기", isOn: $model.draft.shelf.enabled)
+                if model.draft.shelf.enabled {
+                    SliderRow(title: "기억할 개수", value: $model.draft.shelf.maxItems, range: 5...100, step: 5)
+                    SliderRow(title: "런처에 보여 줄 개수", value: $model.draft.shelf.launcherCount, range: 0...8, step: 1)
+                    Toggle("이미지도 모으기", isOn: $model.draft.shelf.captureImages)
+                    Toggle("Finder에서 복사한 파일도 모으기", isOn: $model.draft.shelf.captureFiles)
+                }
+                Text("런처를 검색어 없이 열면 최근 항목이 보이고, \"선반\"을 입력하면 전체를 검색합니다. Return은 다시 복사, ⌘Return은 바로 붙여넣기, ⌘⌫는 삭제이며, 행을 끌어서 다른 앱에 놓을 수도 있습니다. 비밀번호 관리자에서 복사한 것은 담지 않습니다. 앱을 다시 시작해도 남아 있습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

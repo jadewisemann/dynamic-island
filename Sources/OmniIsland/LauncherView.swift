@@ -14,14 +14,6 @@ struct LauncherView: View {
             field
                 .frame(height: LauncherModel.fieldHeight)
                 .padding(.top, 4)
-            if launcher.isShowingRecent {
-                Text("최근에 연 앱")
-                    .font(model.textFont(size: 11, weight: .semibold))
-                    .foregroundStyle(palette.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .frame(height: LauncherModel.headerHeight)
-            }
             if launcher.results.isEmpty && !launcher.query.isEmpty {
                 Text("결과가 없습니다")
                     .font(model.textFont(size: 13, weight: .regular))
@@ -29,16 +21,36 @@ struct LauncherView: View {
                     .frame(height: LauncherModel.messageHeight)
             }
             ForEach(Array(launcher.results.enumerated()), id: \.element.id) { index, item in
-                LauncherRow(model: model, item: item, index: index, selected: index == launcher.selection)
-                    .frame(height: LauncherModel.rowHeight)
-                    .contentShape(Rectangle())
-                    .onHover { inside in if inside { launcher.selection = index } }
-                    .onTapGesture { launcher.activate(index: index) }
+                if let section = item.section,
+                   index == 0 || launcher.results[index - 1].section != section {
+                    Text(section)
+                        .font(model.textFont(size: 11, weight: .semibold))
+                        .foregroundStyle(palette.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .frame(height: LauncherModel.headerHeight)
+                }
+                row(item, index: index)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
+    }
+
+    @ViewBuilder private func row(_ item: LauncherItem, index: Int) -> some View {
+        let base = LauncherRow(model: model, item: item, index: index, selected: index == launcher.selection)
+            .frame(height: LauncherModel.rowHeight)
+            .contentShape(Rectangle())
+            .onHover { inside in if inside { launcher.selection = index } }
+            .onTapGesture { launcher.activate(index: index) }
+        if case .shelf(let shelfItem) = item.kind, let provide = launcher.shelfDragProvider {
+            // Drag a shelf item straight into another app.
+            base.onDrag { provide(shelfItem) }
+        } else {
+            base
+        }
     }
 
     private var field: some View {
@@ -48,7 +60,7 @@ struct LauncherView: View {
                 .foregroundStyle(palette.secondary)
             ZStack(alignment: .leading) {
                 if launcher.query.isEmpty {
-                    Text("앱, 창, 파일, 설정을 검색하거나 웹에서 찾습니다")
+                    Text("앱, 창, 파일, 설정, 선반을 검색하거나 웹에서 찾습니다")
                         .font(model.textFont(size: 15, weight: .regular))
                         .foregroundStyle(palette.secondary)
                         .allowsHitTesting(false)
@@ -125,6 +137,16 @@ private struct LauncherRow: View {
             symbol("capsule.fill")
         case .web(_, let name):
             symbol(name)
+        case .shelf(let shelfItem):
+            if let image = ShelfThumbnails.image(shelfItem) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: shelfItem.kind == .image ? .fill : .fit)
+                    .frame(width: 26, height: 26)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            } else {
+                symbol("doc.on.clipboard")
+            }
         }
     }
 
@@ -247,6 +269,9 @@ struct LauncherField: NSViewRepresentable {
             if chars == "\r" {
                 launcher.activate(alternate: true)
                 return true
+            }
+            if chars == "\u{7F}" || chars == "\u{8}" {
+                return launcher.removeSelected()
             }
             if let digit = Int(chars), (1...9).contains(digit), digit <= launcher.results.count {
                 launcher.activate(index: digit - 1)
