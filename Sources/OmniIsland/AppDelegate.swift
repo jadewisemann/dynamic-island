@@ -339,8 +339,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.configStore.config.shelf.enabled else { return [] }
             return self.shelf.items
         }
-        launcher.onCopyShelf = { [weak self] item in self?.shelf.copy(item) }
-        launcher.onPasteShelf = { [weak self] item in self?.shelf.paste(item) }
+        launcher.onCopyShelf = { [weak self] items in self?.shelf.copy(items) }
+        launcher.onPasteShelf = { [weak self] items in self?.shelf.paste(items) }
         launcher.onRemoveShelf = { [weak self] item in self?.shelf.remove(item) }
         launcher.shelfDragProvider = { [weak self] item in self?.shelf.itemProvider(item) ?? NSItemProvider() }
         configureShelf(configStore.config)
@@ -354,7 +354,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shelf.configure(.init(enabled: s.enabled && !isDemo, maxItems: Int(s.maxItems.rounded()),
                               captureImages: s.captureImages, captureFiles: s.captureFiles,
                               ignoreApps: s.ignoreApps))
-        model.launcher.shelfCount = s.enabled ? Int(s.launcherCount.rounded()) : 0
     }
 
     @objc private func clearShelf() {
@@ -564,7 +563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recentMenu = NSMenu()
         recent.submenu = recentMenu
         menu.addItem(recent)
-        menu.addItem(makeItem("선반 비우기", #selector(clearShelf), ""))
+        menu.addItem(makeItem("클립보드 기록 비우기", #selector(clearShelf), ""))
         let hooks = makeItem("Claude Code 훅 설치", #selector(toggleClaudeHooks), "")
         hooks.state = ClaudeHookInstaller.isInstalled() ? .on : .off
         menu.addItem(hooks)

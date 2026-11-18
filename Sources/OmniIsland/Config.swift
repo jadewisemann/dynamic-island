@@ -273,17 +273,23 @@ struct IslandConfig: Equatable {
         var askClaude = false
         var askGrok = false
         var searchX = false
+        /// Clipboard history in the top-level search (it always has its own
+        /// mode, "c ").
+        var searchClipboard = false
         /// Width of the island while the launcher is open.
         var width = 560.0
+        /// Trigger prefix of each built-in app: typing it and a space enters
+        /// that app alone. "" turns the prefix off.
+        var prefixes: [String: String] = Launcher.defaultPrefixes
+
+        static let defaultPrefixes = ["clipboard": "c", "windows": "w", "settings": "s", "files": "f", "apps": ""]
     }
 
     /// Coding agents (Claude Code, Codex) reporting through `omni-island hook`.
-    /// Clipboard shelf: copies are kept and offered in the launcher.
+    /// Clipboard manager: copies are kept and offered in the launcher ("c ").
     struct Shelf: Equatable {
         var enabled = true
         var maxItems = 30.0
-        /// Shelf rows under the recent apps when the query is empty.
-        var launcherCount = 4.0
         var captureImages = true
         var captureFiles = true
         /// Bundle ids or app names whose copies are never kept (password
@@ -633,11 +639,14 @@ extension IslandConfig {
         c.launcher.askClaude = la.bool("askClaude", c.launcher.askClaude)
         c.launcher.askGrok = la.bool("askGrok", c.launcher.askGrok)
         c.launcher.searchX = la.bool("searchX", c.launcher.searchX)
+        c.launcher.searchClipboard = la.bool("searchClipboard", c.launcher.searchClipboard)
+        for (key, value) in la.sub("prefixes").dict {
+            if let text = value as? String { c.launcher.prefixes[key] = text.trimmingCharacters(in: .whitespaces) }
+        }
 
         let sh = r.sub("shelf")
         c.shelf.enabled = sh.bool("enabled", c.shelf.enabled)
         c.shelf.maxItems = sh.number("maxItems", c.shelf.maxItems)
-        c.shelf.launcherCount = sh.number("launcherCount", c.shelf.launcherCount)
         c.shelf.captureImages = sh.bool("captureImages", c.shelf.captureImages)
         c.shelf.captureFiles = sh.bool("captureFiles", c.shelf.captureFiles)
         c.shelf.ignoreApps = sh.strings("ignoreApps", c.shelf.ignoreApps)
@@ -784,6 +793,11 @@ extension IslandConfig {
         let no = notifications, ca = calendar, d = dashboard, la = launcher, ag = agents, sh = shelf
         func list(_ values: [String]) -> String { "[" + values.map { q($0) }.joined(separator: ", ") + "]" }
         func numberList(_ values: [Double]) -> String { "[" + values.map { n($0) }.joined(separator: ", ") + "]" }
+        func prefixList(_ values: [String: String]) -> String {
+            let order = ["clipboard", "windows", "settings", "files", "apps"]
+            let keys = order.filter { values[$0] != nil } + values.keys.filter { !order.contains($0) }.sorted()
+            return "{ " + keys.map { "\(q($0)): \(q(values[$0] ?? ""))" }.joined(separator: ", ") + " }"
+        }
         let saved = th.saved.map { "      " + Self.savedThemeLine($0) + "," }.joined(separator: "\n")
 
         return """
@@ -991,15 +1005,20 @@ extension IslandConfig {
             "askClaude": \(b(la.askClaude)),
             "askGrok": \(b(la.askGrok)),
             "searchX": \(b(la.searchX)),
+            // 복사 기록도 기본 검색에 섞어서 보여 줍니다. 꺼 두어도 "c "로 클립보드 관리자에 들어갈 수 있습니다.
+            "searchClipboard": \(b(la.searchClipboard)),
             "width": \(n(la.width)),
+            // 내장 앱의 트리거 접두어입니다. 접두어 다음에 스페이스를 누르면 그 앱만 보입니다.
+            // 한글 자판으로 친 글자(ㅊ, ㅈ, ㄴ, ㄹ)도 됩니다. ""로 두면 접두어를 쓰지 않습니다.
+            // clipboard: 클립보드 관리자, windows: 창 관리자, settings: 설정 관리자, files: 파일 검색, apps: 앱
+            "prefixes": \(prefixList(la.prefixes)),
           },
 
           "shelf": {
-            // 복사한 텍스트, 이미지, 파일을 기억해서 런처(⌥H)에서 다시 꺼냅니다.
-            // 검색어 없이 열면 최근 항목이, "선반"을 입력하면 전체가 보입니다.
+            // 클립보드 관리자: 복사한 텍스트, 이미지, 파일을 기억합니다.
+            // 런처(⌥H)에서 "c "를 입력하면 기록이 나오고, Return으로 붙여넣습니다.
             "enabled": \(b(sh.enabled)),
             "maxItems": \(n(sh.maxItems)),
-            "launcherCount": \(n(sh.launcherCount)),
             "captureImages": \(b(sh.captureImages)),
             "captureFiles": \(b(sh.captureFiles)),
             // 여기 적은 앱(번들 ID나 이름)에서 복사한 것은 담지 않습니다. 비밀번호 관리자는 항상 뺍니다.

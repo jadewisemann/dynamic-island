@@ -1185,7 +1185,25 @@ private struct LauncherSettings: View {
                 Text("열기")
             }
 
-            Section("검색 대상") {
+            Section {
+                ForEach(Self.plugins, id: \.id) { plugin in
+                    LabeledContent {
+                        TextField("", text: prefixBinding(plugin.id), prompt: Text("없음"))
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 70)
+                    } label: {
+                        Label(plugin.name, systemImage: plugin.symbol)
+                    }
+                }
+                Text("검색창에 접두어를 입력하고 스페이스를 누르면 그 내장 앱만 보입니다. 예를 들어 c 다음에 스페이스를 누르면 클립보드 관리자가 열립니다. 한글 자판으로 친 ㅊ, ㅈ, ㄴ, ㄹ도 됩니다. 빈 검색창에서 ⌫ 또는 Esc를 누르면 처음 검색으로 돌아갑니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("내장 앱과 트리거 접두어")
+            }
+            .disabled(!model.draft.launcher.enabled)
+
+            Section("기본 검색에 포함할 것") {
                 Toggle("앱", isOn: $model.draft.launcher.searchApps)
                 Toggle("OmniWM에 열려 있는 창", isOn: $model.draft.launcher.searchWindows)
                 Text("창은 Return을 누르면 그 창으로 이동하고, ⌘Return을 누르면 지금 워크스페이스로 불러옵니다. 앱은 ⌘Return을 누르면 Finder에서 보여 줍니다.")
@@ -1198,6 +1216,7 @@ private struct LauncherSettings: View {
                 if model.draft.launcher.searchFiles {
                     SliderRow(title: "파일 결과 수", value: $model.draft.launcher.maxFiles, range: 1...8, step: 1)
                 }
+                Toggle("클립보드 기록", isOn: $model.draft.launcher.searchClipboard)
             }
             .disabled(!model.draft.launcher.enabled)
 
@@ -1230,20 +1249,34 @@ private struct LauncherSettings: View {
             }
             .disabled(!model.draft.launcher.enabled)
 
-            Section("선반") {
-                Toggle("복사한 것을 선반에 모으기", isOn: $model.draft.shelf.enabled)
+            Section("클립보드 관리자") {
+                Toggle("복사한 것을 기록하기", isOn: $model.draft.shelf.enabled)
                 if model.draft.shelf.enabled {
-                    SliderRow(title: "기억할 개수", value: $model.draft.shelf.maxItems, range: 5...100, step: 5)
-                    SliderRow(title: "런처에 보여 줄 개수", value: $model.draft.shelf.launcherCount, range: 0...8, step: 1)
-                    Toggle("이미지도 모으기", isOn: $model.draft.shelf.captureImages)
-                    Toggle("Finder에서 복사한 파일도 모으기", isOn: $model.draft.shelf.captureFiles)
+                    SliderRow(title: "기억할 개수", value: $model.draft.shelf.maxItems, range: 5...200, step: 5)
+                    Toggle("이미지도 기록하기", isOn: $model.draft.shelf.captureImages)
+                    Toggle("Finder에서 복사한 파일도 기록하기", isOn: $model.draft.shelf.captureFiles)
                 }
-                Text("런처를 검색어 없이 열면 최근 항목이 보이고, \"선반\"을 입력하면 전체를 검색합니다. Return은 다시 복사, ⌘Return은 바로 붙여넣기, ⌘⌫는 삭제이며, 행을 끌어서 다른 앱에 놓을 수도 있습니다. 비밀번호 관리자에서 복사한 것은 담지 않습니다. 앱을 다시 시작해도 남아 있습니다.")
+                Text("런처에서 c 다음에 스페이스를 누르면 복사 기록이 최신순으로 나오고, 입력하면 그 안에서 검색합니다. Return은 원래 앱에 붙여넣기, ⌘Return은 복사만 하기, ⌘⌫는 삭제입니다. Tab이나 ⇧↑↓, ⌘클릭으로 여러 개를 고르면 고른 순서대로 한꺼번에 붙여넣습니다(텍스트는 줄을 바꿔 이어 붙입니다). 행을 끌어서 다른 앱에 놓을 수도 있습니다. 비밀번호 관리자에서 복사한 것은 기록하지 않으며, 앱을 다시 시작해도 남아 있습니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private static let plugins: [(id: String, name: String, symbol: String)] = [
+        ("clipboard", "클립보드 관리자", "doc.on.clipboard"),
+        ("windows", "창 관리자", "macwindow.on.rectangle"),
+        ("settings", "설정 관리자", "gearshape.fill"),
+        ("files", "파일 검색", "doc.text.magnifyingglass"),
+        ("apps", "앱", "square.grid.2x2"),
+    ]
+
+    private func prefixBinding(_ id: String) -> Binding<String> {
+        Binding(
+            get: { model.draft.launcher.prefixes[id] ?? "" },
+            set: { model.draft.launcher.prefixes[id] = $0.replacingOccurrences(of: " ", with: "").lowercased() }
+        )
     }
 
     private var hotkeyOptions: [(String, String)] {

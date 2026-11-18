@@ -45,8 +45,8 @@ struct ShelfItem: Codable, Identifiable, Equatable {
     }
 }
 
-/// Keeps what was copied to the clipboard, so it can be taken out again from
-/// the launcher (⌥H) later, even after a restart.
+/// The clipboard manager's history: keeps what was copied, so it can be
+/// pasted again from the launcher ("c " after ⌥H), even after a restart.
 @MainActor
 final class ClipboardShelf {
     struct Options: Equatable {
@@ -219,10 +219,62 @@ final class ClipboardShelf {
         bump(item)
     }
 
+    /// Several items at once: text joined line by line, anything else as
+    /// separate clipboard items.
+    func copy(_ items: [ShelfItem]) {
+        guard items.count > 1 else {
+            if let item = items.first { copy(item) }
+            return
+        }
+        let board = NSPasteboard.general
+        board.clearContents()
+        if items.allSatisfy({ $0.kind == .text }) {
+            board.setString(items.map { $0.text ?? "" }.joined(separator: "\n"), forType: .string)
+        } else {
+            var objects: [NSPasteboardWriting] = []
+            for item in items {
+                switch item.kind {
+                case .text:
+                    objects.append((item.text ?? "") as NSString)
+                case .image:
+                    if let image = imageURL(item).flatMap({ NSImage(contentsOf: $0) }) { objects.append(image) }
+                case .files:
+                    objects += (item.paths ?? []).map { URL(fileURLWithPath: $0) as NSURL }
+                }
+            }
+            board.writeObjects(objects)
+        }
+        ownChangeCount = board.changeCount
+        lastChangeCount = board.changeCount
+    }
+
     /// Copies, then presses ⌘V in the app that gets focus back.
     func paste(_ item: ShelfItem) {
-        copy(item)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+        paste([item])
+    }
+
+    /// Pastes several items: text in one go, joined line by line; images
+    /// and files one after another, since most apps take only the first
+    /// thing on the clipboard.
+    func paste(_ items: [ShelfItem]) {
+        guard !items.isEmpty else { return }
+        if items.count == 1 || items.allSatisfy({ $0.kind == .text }) {
+            copy(items)
+            Self.pressPaste(after: 0.18)
+            return
+        }
+        for (n, item) in items.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4 * Double(n)) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.copy(item)
+                    Self.pressPaste(after: 0.18)
+                }
+            }
+        }
+    }
+
+    nonisolated private static func pressPaste(after delay: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             let source = CGEventSource(stateID: .combinedSessionState)
             let vKey: CGKeyCode = 9
             let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)
