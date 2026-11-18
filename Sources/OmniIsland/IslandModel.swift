@@ -74,6 +74,7 @@ final class IslandModel: ObservableObject {
     @Published var lookOverride: Bool?
     /// Search mode (phase .launcher).
     let launcher = LauncherModel()
+    private let inputSwitcher = InputSourceSwitcher()
     /// Height of the launcher below the workspace row, kept here so the
     /// island's size animates with the result list.
     @Published private(set) var launcherHeight: CGFloat = 0
@@ -143,6 +144,7 @@ final class IslandModel: ObservableObject {
         collapseWork?.cancel()
         if phase == .notification { interruptNotification() }
         clearMissed()
+        if config.launcher.englishInput { inputSwitcher.switchToEnglish() }
         launcher.begin()
         launcherHeight = launcher.bodyHeight
         setPhase(.launcher)
@@ -150,6 +152,7 @@ final class IslandModel: ObservableObject {
 
     func closeLauncher() {
         guard phase == .launcher else { return }
+        inputSwitcher.restore()
         pointerInside = false
         setPhase(modifierHeld ? .compact : .hidden)
         if !modifierHeld { showNextNotification() }

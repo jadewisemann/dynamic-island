@@ -1178,7 +1178,9 @@ private struct LauncherSettings: View {
                     }
                 }
                 .disabled(!model.draft.launcher.enabled)
-                Text("Option을 누르고 있으면 아일랜드가 나타나고, 이어서 H를 누르면 검색창이 열립니다. 바로 입력하면 결과가 아래로 붙습니다. ↑↓로 고르고 Return으로 실행하며, Esc를 누르면 검색어를 지우고 한 번 더 누르면 닫힙니다.")
+                Toggle("열 때 영어 입력으로 바꾸기", isOn: $model.draft.launcher.englishInput)
+                    .disabled(!model.draft.launcher.enabled)
+                Text("Option을 누르고 있으면 아일랜드가 나타나고, 이어서 H를 누르면 검색창이 열립니다. 바로 입력하면 결과가 아래로 붙습니다. 영어 입력으로 바꾸기를 켜 두면 한글 입력 중이었더라도 영어로 시작하고, 닫을 때 원래 입력 소스로 돌아갑니다. 열린 상태에서 입력 소스를 바꾸면 한글로도 검색할 수 있습니다. ↑↓로 고르고 Return으로 실행하며, Esc를 누르면 검색어를 지우고 한 번 더 누르면 닫힙니다.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } header: {
