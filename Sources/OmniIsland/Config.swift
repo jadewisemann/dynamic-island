@@ -15,6 +15,9 @@ struct IslandConfig: Equatable {
     var theme = Theme()
     var layout = Layout()
     var widgets = Widgets()
+    var notifications = Notifications()
+    var calendar = CalendarConfig()
+    var dashboard = Dashboard()
     // JSON key "animation"; named `motion` in Swift because `Binding.animation(_:)` would shadow it.
     var motion = AnimationConfig()
 
@@ -171,7 +174,7 @@ struct IslandConfig: Equatable {
 
     struct Widgets: Equatable {
         /// Content of the notch-height strip, left and right of the notch:
-        /// app | workspace | clock | date | windows | none
+        /// app | workspace | clock | date | windows | nextEvent | notifications | none
         var leftWing = "app"
         var rightWing = "workspace"
         /// name | number | both
@@ -181,6 +184,50 @@ struct IslandConfig: Equatable {
         var eventFromTo = true
         /// 24h | 12h | 24hSeconds
         var clockFormat = "24h"
+    }
+
+    /// macOS notifications read from Notification Center banners.
+    struct Notifications: Equatable {
+        var enabled = true
+        /// How long a notification card stays expanded.
+        var durationMs = 4000.0
+        /// full | title | app (how much of the notification is shown)
+        var contentMode = "full"
+        /// all | allow (only `apps`) | block (everything except `apps`)
+        var filterMode = "all"
+        /// App names or bundle ids for the filter.
+        var apps: [String] = []
+        /// Also read the usernoted database (needs Full Disk Access). Sees
+        /// apps whose banners are turned off.
+        var readDatabase = true
+        /// Close the system banner right after reading it.
+        var dismissSystemBanner = false
+        /// Keep small icons of missed notifications beside the notch.
+        var keepIndicator = true
+        var indicatorTimeoutMin = 30.0
+        /// Merge notifications from the same app that arrive within this time.
+        var mergeWindowMs = 3000.0
+    }
+
+    struct CalendarConfig: Equatable {
+        /// Off by default because turning it on asks for calendar access.
+        var enabled = false
+        /// Calendar titles or identifiers to use. Empty uses every calendar.
+        var calendars: [String] = []
+        /// Alert this many minutes before each event (0 = when it starts).
+        var alertMinutes: [Double] = [5, 0]
+        var showAlerts = true
+        var includeAllDay = false
+    }
+
+    /// Clock, today's events and recent notifications, shown when the
+    /// modifier is held a little longer.
+    struct Dashboard: Equatable {
+        var enabled = true
+        /// Extra hold time after the workspace row appears.
+        var holdMs = 800.0
+        /// clock | events | notifications, in display order.
+        var items = ["clock", "events", "notifications"]
     }
 
     struct AnimationConfig: Equatable {
@@ -459,6 +506,30 @@ extension IslandConfig {
         c.widgets.eventFromTo = w.bool("eventFromTo", c.widgets.eventFromTo)
         c.widgets.clockFormat = w.string("clockFormat", c.widgets.clockFormat)
 
+        let no = r.sub("notifications")
+        c.notifications.enabled = no.bool("enabled", c.notifications.enabled)
+        c.notifications.durationMs = no.number("durationMs", c.notifications.durationMs)
+        c.notifications.contentMode = no.string("contentMode", c.notifications.contentMode)
+        c.notifications.filterMode = no.string("filterMode", c.notifications.filterMode)
+        c.notifications.apps = no.strings("apps", c.notifications.apps)
+        c.notifications.readDatabase = no.bool("readDatabase", c.notifications.readDatabase)
+        c.notifications.dismissSystemBanner = no.bool("dismissSystemBanner", c.notifications.dismissSystemBanner)
+        c.notifications.keepIndicator = no.bool("keepIndicator", c.notifications.keepIndicator)
+        c.notifications.indicatorTimeoutMin = no.number("indicatorTimeoutMin", c.notifications.indicatorTimeoutMin)
+        c.notifications.mergeWindowMs = no.number("mergeWindowMs", c.notifications.mergeWindowMs)
+
+        let ca = r.sub("calendar")
+        c.calendar.enabled = ca.bool("enabled", c.calendar.enabled)
+        c.calendar.calendars = ca.strings("calendars", c.calendar.calendars)
+        c.calendar.alertMinutes = ca.numbers("alertMinutes", c.calendar.alertMinutes)
+        c.calendar.showAlerts = ca.bool("showAlerts", c.calendar.showAlerts)
+        c.calendar.includeAllDay = ca.bool("includeAllDay", c.calendar.includeAllDay)
+
+        let d = r.sub("dashboard")
+        c.dashboard.enabled = d.bool("enabled", c.dashboard.enabled)
+        c.dashboard.holdMs = d.number("holdMs", c.dashboard.holdMs)
+        c.dashboard.items = d.strings("items", c.dashboard.items)
+
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
         c.motion.response = n.number("response", c.motion.response)
@@ -503,6 +574,16 @@ private struct ConfigReader {
 
     func bool(_ key: String, _ fallback: Bool) -> Bool {
         dict[key] as? Bool ?? fallback
+    }
+
+    func strings(_ key: String, _ fallback: [String]) -> [String] {
+        guard let array = dict[key] as? [Any] else { return fallback }
+        return array.compactMap { $0 as? String }
+    }
+
+    func numbers(_ key: String, _ fallback: [Double]) -> [Double] {
+        guard let array = dict[key] as? [Any] else { return fallback }
+        return array.compactMap { ($0 as? NSNumber)?.doubleValue }.filter(\.isFinite)
     }
 
     static func expandTilde(_ path: String) -> String {
@@ -578,6 +659,9 @@ extension IslandConfig {
         let q = Self.quote, n = Self.number
         func b(_ v: Bool) -> String { v ? "true" : "false" }
         let t = trigger, be = behavior, a = appearance, an = motion, th = theme, l = layout, w = widgets
+        let no = notifications, ca = calendar, d = dashboard
+        func list(_ values: [String]) -> String { "[" + values.map { q($0) }.joined(separator: ", ") + "]" }
+        func numberList(_ values: [Double]) -> String { "[" + values.map { n($0) }.joined(separator: ", ") + "]" }
         let saved = th.saved.map { "      " + Self.savedThemeLine($0) + "," }.joined(separator: "\n")
 
         return """
@@ -690,7 +774,8 @@ extension IslandConfig {
           },
 
           "widgets": {
-            // 노치 양옆에 보여 줄 내용: app | workspace | clock | date | windows | none
+            // 노치 양옆에 보여 줄 내용:
+            // app | workspace | clock | date | windows | nextEvent(다음 일정) | notifications(놓친 알림 수) | none
             "leftWing": \(q(w.leftWing)),
             "rightWing": \(q(w.rightWing)),
             // 워크스페이스 이름: name(OmniWM 표시 이름) | number(번호) | both(번호와 이름)
@@ -701,6 +786,48 @@ extension IslandConfig {
             "eventFromTo": \(b(w.eventFromTo)),
             // 24h | 12h | 24hSeconds
             "clockFormat": \(q(w.clockFormat)),
+          },
+
+          "notifications": {
+            // macOS 알림 배너를 읽어 아일랜드에 보여 줍니다 (손쉬운 사용 권한 필요).
+            "enabled": \(b(no.enabled)),
+            "durationMs": \(n(no.durationMs)),
+            // full(전체) | title(제목까지) | app(앱 이름만)
+            "contentMode": \(q(no.contentMode)),
+            // all(모든 앱) | allow(apps에 적은 앱만) | block(apps에 적은 앱 빼고)
+            "filterMode": \(q(no.filterMode)),
+            // 앱 이름이나 번들 ID를 적습니다. 예: ["Slack", "com.apple.MobileSMS"]
+            "apps": \(list(no.apps)),
+            // macOS 알림 데이터베이스도 읽습니다 (전체 디스크 접근 권한 필요).
+            // 배너를 꺼 둔 앱의 알림도 볼 수 있습니다.
+            "readDatabase": \(b(no.readDatabase)),
+            // 내용을 읽은 직후 macOS 기본 배너를 닫습니다.
+            "dismissSystemBanner": \(b(no.dismissSystemBanner)),
+            // 알림이 접힌 뒤에도 노치 옆에 놓친 알림 아이콘을 남깁니다.
+            "keepIndicator": \(b(no.keepIndicator)),
+            "indicatorTimeoutMin": \(n(no.indicatorTimeoutMin)),
+            // 같은 앱에서 이 시간 안에 온 알림은 한 장으로 합칩니다.
+            "mergeWindowMs": \(n(no.mergeWindowMs)),
+          },
+
+          "calendar": {
+            // 켜면 캘린더 접근 권한을 묻습니다.
+            "enabled": \(b(ca.enabled)),
+            // 사용할 캘린더 이름. 비워 두면 전체를 씁니다.
+            "calendars": \(list(ca.calendars)),
+            // 일정 시작 몇 분 전에 알릴지 정합니다 (0은 시작 시각).
+            "alertMinutes": \(numberList(ca.alertMinutes)),
+            "showAlerts": \(b(ca.showAlerts)),
+            "includeAllDay": \(b(ca.includeAllDay)),
+          },
+
+          "dashboard": {
+            // modifier를 더 길게 누르면 시계, 오늘 일정, 최근 알림을 보여 줍니다.
+            "enabled": \(b(d.enabled)),
+            // 워크스페이스 줄이 나타난 뒤 이만큼 더 누르고 있으면 펼칩니다.
+            "holdMs": \(n(d.holdMs)),
+            // clock | events | notifications (적은 순서대로 보여 줍니다)
+            "items": \(list(d.items)),
           },
 
           "animation": {
