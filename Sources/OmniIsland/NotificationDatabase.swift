@@ -45,11 +45,33 @@ enum NotificationDatabaseReader {
         }
         // Without Full Disk Access the Group Containers folder itself may be
         // hidden, so "not found" can also mean "no permission".
-        let container = NSHomeDirectory() + "/Library/Group Containers/group.com.apple.usernoted"
-        if sawFile || (fm.fileExists(atPath: container) && !fm.isReadableFile(atPath: container)) {
+        if sawFile || !canListContainer() {
             return .failure(.noPermission)
         }
         return .failure(.notFound)
+    }
+
+    static let containerPath = NSHomeDirectory() + "/Library/Group Containers/group.com.apple.usernoted"
+
+    /// Listing the usernoted container fails without Full Disk Access even
+    /// when `fileExists` still says the folder is there.
+    private static func canListContainer() -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: containerPath) else {
+            // macOS 14 keeps the database elsewhere; nothing to judge here.
+            return true
+        }
+        return (try? fm.contentsOfDirectory(atPath: containerPath)) != nil
+    }
+
+    /// Best guess at whether this app has Full Disk Access: the notification
+    /// database (or, failing that, the user TCC database) can be opened.
+    static func hasFullDiskAccess() -> Bool {
+        if case .success(let path) = locate(), FileHandle(forReadingAtPath: path) != nil {
+            return true
+        }
+        let tcc = NSHomeDirectory() + "/Library/Application Support/com.apple.TCC/TCC.db"
+        return FileHandle(forReadingAtPath: tcc) != nil
     }
 
     /// Highest row id, so a fresh start does not replay old notifications.
@@ -66,13 +88,23 @@ enum NotificationDatabaseReader {
 
     static func rows(path: String, after id: Int64) -> Result<[Row], Failure> {
         withDatabase(path) { db in
-            let sql = """
+            // Older and newer schemas differ in the date column, so fall back
+            // to a query without it.
+            let queries = [
+                """
                 SELECT r.rec_id, a.identifier, r.data, r.delivered_date
                 FROM record r LEFT JOIN app a ON a.app_id = r.app_id
                 WHERE r.rec_id > ?1 ORDER BY r.rec_id LIMIT 50
+                """,
                 """
+                SELECT r.rec_id, a.identifier, r.data, NULL
+                FROM record r LEFT JOIN app a ON a.app_id = r.app_id
+                WHERE r.rec_id > ?1 ORDER BY r.rec_id LIMIT 50
+                """,
+                "SELECT rec_id, NULL, data, NULL FROM record WHERE rec_id > ?1 ORDER BY rec_id LIMIT 50",
+            ]
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK
+            guard queries.contains(where: { sqlite3_prepare_v2(db, $0, -1, &stmt, nil) == SQLITE_OK })
             else { return .failure(.unreadable(message(db))) }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_int64(stmt, 1, id)
@@ -177,8 +209,14 @@ final class NotificationDatabaseWatcher {
     var onNotification: ((IslandNotification) -> Void)?
     var onStatus: ((Status) -> Void)?
     private(set) var status: Status = .off {
-        didSet { if status != oldValue { onStatus?(status) } }
+        didSet {
+            guard status != oldValue else { return }
+            Log.info("notification database: \(status.label)" + (path.map { " (\($0))" } ?? ""))
+            onStatus?(status)
+        }
     }
+    /// Database file being read, for diagnostics.
+    var currentPath: String? { path }
 
     private let queue = DispatchQueue(label: "omni-island.notification-db", qos: .utility)
     private var timer: Timer?
@@ -192,7 +230,8 @@ final class NotificationDatabaseWatcher {
 
     private func start() {
         guard timer == nil else { return }
-        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+        // File events below catch most writes at once; the timer is a fallback.
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
         t.tolerance = 0.3
@@ -204,13 +243,57 @@ final class NotificationDatabaseWatcher {
     private func stop() {
         timer?.invalidate()
         timer = nil
+        unwatch()
         path = nil
         lastId = nil
         status = .off
     }
 
+    // MARK: - File events
+
+    private var sources: [DispatchSourceFileSystemObject] = []
+    private var watchedPath: String?
+    private var pollAgain = false
+
+    /// Watches the database and its write-ahead log, so a new row is read
+    /// right after usernoted writes it instead of on the next timer tick.
+    private func watch(_ path: String) {
+        guard watchedPath != path else { return }
+        unwatch()
+        watchedPath = path
+        for file in [path, path + "-wal"] {
+            let fd = open(file, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd, eventMask: [.write, .extend, .delete, .rename], queue: .main)
+            source.setEventHandler { [weak self, weak source] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let flags = source?.data ?? []
+                    if flags.contains(.delete) || flags.contains(.rename) {
+                        // The log was replaced; watch the new file.
+                        self.unwatch()
+                    }
+                    self.poll()
+                }
+            }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            sources.append(source)
+        }
+    }
+
+    private func unwatch() {
+        sources.forEach { $0.cancel() }
+        sources.removeAll()
+        watchedPath = nil
+    }
+
     private func poll() {
-        guard !reading else { return }
+        guard !reading else {
+            pollAgain = true
+            return
+        }
         reading = true
         let knownPath = path
         let after = lastId
@@ -222,6 +305,11 @@ final class NotificationDatabaseWatcher {
                     self.reading = false
                     guard self.timer != nil else { return }
                     self.apply(outcome)
+                    if let path = self.path { self.watch(path) } else { self.unwatch() }
+                    if self.pollAgain {
+                        self.pollAgain = false
+                        self.poll()
+                    }
                 }
             }
         }
@@ -272,6 +360,7 @@ final class NotificationDatabaseWatcher {
         lastId = outcome.lastId
         status = .running
         for row in outcome.rows {
+            Log.info("notification database row \(row.id): \(row.bundleId ?? "?") title=\(row.title != nil) body=\(row.body != nil)")
             if let n = NotificationDatabaseReader.notification(from: row) {
                 onNotification?(n)
             }

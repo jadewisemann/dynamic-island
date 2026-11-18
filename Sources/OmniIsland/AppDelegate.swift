@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var demoStep = 0
     private var settingsModel: SettingsModel?
     private var settingsController: SettingsWindowController?
+    private let onboarding = OnboardingWindowController()
+    private var recentMenu = NSMenu()
 
     private let isDemo = CommandLine.arguments.contains("--demo")
     private var appearanceObservation: NSKeyValueObservation?
@@ -64,6 +66,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.onEvent = { [weak self] event in
             self?.model.present(event)
         }
+        model.onActivateApp = { [weak self] app, ws in
+            self?.activate(app, in: ws)
+        }
+        model.onFocusWorkspace = { [weak self] ws in
+            self?.focusWorkspace(ws)
+        }
+        model.onOpenNotification = { [weak self] n in
+            self?.openNotification(n)
+        }
+        model.onRecentChange = { [weak self] in
+            self?.rebuildRecentMenu()
+        }
 
         client.onMessage = { [weak self] message in
             self?.tracker.handle(message)
@@ -89,7 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.receive(notification)
         }
         notificationDatabase.onNotification = { [weak self] notification in
-            self?.receive(notification)
+            guard let self else { return }
+            self.receive(notification)
+            if self.configStore.config.notifications.dismissSystemBanner {
+                self.notificationWatcher.dismissVisibleBanners()
+            }
         }
         notificationDatabase.onStatus = { [weak self] status in
             self?.settingsModel?.notificationDatabaseStatus = status
@@ -106,12 +124,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsModel?.calendarAccess = access
         }
         configureWidgets(configStore.config)
-        modifiers.start(promptForAccessibility: !isDemo)
+        setUpOnboarding()
+        let launchSteps = isDemo ? [] : OnboardingStore.launchSteps(for: configStore.config)
+        // The onboarding window explains Accessibility before macOS asks.
+        modifiers.start(promptForAccessibility: !isDemo && launchSteps.isEmpty)
 
         rebuildStatusItem()
         settingsModel?.connectionStatus = isDemo ? "데모 모드" : client.status.label
 
-        if configStore.createdDefaultFile || !configStore.config.behavior.showMenuBarIcon {
+        if !launchSteps.isEmpty {
+            onboarding.show(steps: launchSteps)
+        } else if configStore.createdDefaultFile || !configStore.config.behavior.showMenuBarIcon {
             showSettings()
         }
 
@@ -198,6 +221,111 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsModel?.notificationDatabaseStatus = notificationDatabase.status
     }
 
+    // MARK: - Notification history
+
+    private func openNotification(_ n: IslandNotification) {
+        let bundleId = n.source == .calendar ? "com.apple.iCal" : n.bundleId
+        if let bundleId, !bundleId.isEmpty { activateApp(bundleId: bundleId) }
+    }
+
+    private func rebuildRecentMenu() {
+        recentMenu.removeAllItems()
+        let list = model.recentNotifications
+        if list.isEmpty {
+            let empty = NSMenuItem(title: "받은 알림이 없습니다", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            recentMenu.addItem(empty)
+            return
+        }
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("HHmm")
+        for (index, n) in list.prefix(15).enumerated() {
+            let text = model.visibleText(n)
+            var title = "\(formatter.string(from: n.date))  \(n.appName) · \(text.title)"
+            if let body = text.body ?? text.subtitle { title += " — " + body }
+            if title.count > 80 { title = String(title.prefix(79)) + "…" }
+            let item = NSMenuItem(title: title, action: #selector(openRecent(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            recentMenu.addItem(item)
+        }
+        recentMenu.addItem(.separator())
+        recentMenu.addItem(makeItem("기록 지우기", #selector(clearRecent), ""))
+    }
+
+    @objc private func openRecent(_ sender: NSMenuItem) {
+        let list = model.recentNotifications
+        guard list.indices.contains(sender.tag) else { return }
+        openNotification(list[sender.tag])
+    }
+
+    @objc private func clearRecent() {
+        model.clearRecent()
+    }
+
+    // MARK: - Permissions
+
+    private func setUpOnboarding() {
+        onboarding.configure = { [weak self] model in
+            model.onSendTestNotification = { NotificationWatcher.sendTestNotification() }
+            model.onCalendarGranted = { [weak self] in self?.enableCalendar() }
+        }
+    }
+
+    /// Granting calendar access in the onboarding means the user wants it.
+    private func enableCalendar() {
+        var config = configStore.config
+        guard !config.calendar.enabled else {
+            calendarProvider.refresh()
+            return
+        }
+        config.calendar.enabled = true
+        configStore.save(config)
+    }
+
+    @objc private func showPermissionsWindow() {
+        onboarding.show(steps: OnboardingStore.relevant(for: configStore.config))
+    }
+
+    private func showOnboarding(at kind: PermissionKind) {
+        onboarding.show(steps: OnboardingStore.relevant(for: configStore.config), at: kind)
+    }
+
+    // MARK: - Clicks in the workspace row
+
+    /// Brings the clicked window forward through OmniWM (which also switches
+    /// workspace), falling back to activating the app.
+    private func activate(_ app: WorkspaceApp, in ws: WorkspaceItem) {
+        let fallback = { [weak self] in
+            if let bundleId = app.bundleId { self?.activateApp(bundleId: bundleId) }
+        }
+        guard !isDemo, let id = app.targetWindowId else {
+            fallback()
+            return
+        }
+        let config = configStore.config
+        OmniWMClient.run(["window", "navigate", id], executablePath: config.omniwmctlPath,
+                         socketPath: config.socketPath) { ok in
+            if !ok { fallback() }
+        }
+    }
+
+    private func focusWorkspace(_ ws: WorkspaceItem) {
+        guard !isDemo else { return }
+        let name = ws.rawName ?? ws.label
+        let config = configStore.config
+        OmniWMClient.run(["workspace", "focus-name", name], executablePath: config.omniwmctlPath,
+                         socketPath: config.socketPath) { _ in }
+    }
+
+    private func activateApp(bundleId: String) {
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
+            running.activate()
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
     /// Banner observation and the database usually both see a notification.
     private func receive(_ notification: IslandNotification) {
         guard deduplicator.accept(notification) else { return }
@@ -241,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ax.target = self
         menu.addItem(ax)
         accessibilityMenuItem = ax
+        menu.addItem(makeItem("권한 설정…", #selector(showPermissionsWindow), ""))
 
         menu.addItem(.separator())
         menu.addItem(makeItem("애니메이션 미리보기", #selector(playDemo), "p"))
@@ -251,6 +380,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationMenu.addItem(makeItem("알림 배너 구조 기록 (1분)", #selector(recordNotificationDiagnostics), ""))
         notifications.submenu = notificationMenu
         menu.addItem(notifications)
+        let recent = NSMenuItem(title: "최근 알림", action: nil, keyEquivalent: "")
+        recentMenu = NSMenu()
+        recent.submenu = recentMenu
+        menu.addItem(recent)
+        rebuildRecentMenu()
         menu.addItem(makeItem("설정…", #selector(showSettings), ","))
         menu.addItem(makeItem("설정 파일 열기", #selector(openConfig), ""))
         menu.addItem(makeItem("설정 다시 불러오기", #selector(reloadConfig), "r"))
@@ -292,10 +426,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.onPreviewNotification = { [weak self] in self?.previewNotification() }
         settings.onSendTestNotification = { NotificationWatcher.sendTestNotification() }
         settings.onRecordNotificationDiagnostics = { [weak self] in self?.recordNotificationDiagnostics() }
-        settings.onOpenFullDiskAccess = {
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                NSWorkspace.shared.open(url)
-            }
+        settings.onOpenFullDiskAccess = { [weak self] in
+            self?.showOnboarding(at: .fullDiskAccess)
         }
         settings.onOpenCalendarPrivacy = {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
@@ -355,7 +487,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Records the Notification Center tree for a minute while a test banner
     /// arrives, then shows the log so it can be attached to a bug report.
     @objc private func recordNotificationDiagnostics() {
-        let url = notificationWatcher.recordDiagnostics(seconds: 60)
+        let n = configStore.config.notifications
+        let context = [
+            "notifications.enabled: \(n.enabled), readDatabase: \(n.readDatabase)",
+            "full disk access: \(NotificationDatabaseReader.hasFullDiskAccess())",
+            "database: \(notificationDatabase.status.label) \(notificationDatabase.currentPath ?? "")",
+            "database candidates: \(NotificationDatabaseReader.candidatePaths.joined(separator: ", "))",
+        ]
+        let url = notificationWatcher.recordDiagnostics(seconds: 60, context: context)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             NotificationWatcher.sendTestNotification()
         }
@@ -437,7 +576,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 app: AppRef(name: entry.1, bundleId: entry.2),
                 title: entry.1,
                 isFocused: index == 0,
-                isScratchpad: false
+                isScratchpad: false,
+                mode: entry.1 == "System Settings" ? "floating" : "tiling",
+                pid: nil
             )
             demoWindows.append(window)
         }

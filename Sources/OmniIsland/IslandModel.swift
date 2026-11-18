@@ -72,6 +72,17 @@ final class IslandModel: ObservableObject {
     var isPreview = false
 
     private(set) var modifierHeld = false
+    /// The mouse is over the island; keeps it open after the modifier is
+    /// released so its icons can be clicked.
+    private(set) var pointerInside = false
+    /// Clicked an app icon in the workspace row.
+    var onActivateApp: ((WorkspaceApp, WorkspaceItem) -> Void)?
+    /// Clicked a workspace label or pill.
+    var onFocusWorkspace: ((WorkspaceItem) -> Void)?
+    /// Clicked a notification card or a row of the notification history.
+    var onOpenNotification: ((IslandNotification) -> Void)?
+    /// The notification history changed (for the menu bar list).
+    var onRecentChange: (() -> Void)?
     private var showWork: DispatchWorkItem?
     private var hideWork: DispatchWorkItem?
     private var collapseWork: DispatchWorkItem?
@@ -107,8 +118,10 @@ final class IslandModel: ObservableObject {
 
     /// Fills the model with sample workspaces for the settings preview.
     func loadSample() {
-        func app(_ name: String, _ bundle: String, windows: Int = 1, focused: Bool = false) -> WorkspaceApp {
-            WorkspaceApp(id: bundle.lowercased(), name: name, bundleId: bundle, windowCount: windows, isFocused: focused)
+        func app(_ name: String, _ bundle: String, windows: Int = 1, focused: Bool = false,
+                 floating: Bool = false) -> WorkspaceApp {
+            WorkspaceApp(id: bundle.lowercased(), name: name, bundleId: bundle, windowCount: windows,
+                         isFocused: focused, isFloating: floating)
         }
         func ws(_ n: Int, _ name: String, _ apps: [WorkspaceApp]) -> WorkspaceItem {
             WorkspaceItem(id: "sample-\(n)", label: name, number: n, displayId: nil, displayName: nil,
@@ -119,7 +132,7 @@ final class IslandModel: ObservableObject {
             ws(1, "web", [app("Finder", "com.apple.finder", focused: true), app("Safari", "com.apple.Safari", windows: 2)]),
             ws(2, "chat", [app("Messages", "com.apple.MobileSMS")]),
             ws(3, "dev", [app("Terminal", "com.apple.Terminal")]),
-            ws(4, "mail", [app("Mail", "com.apple.mail"), app("System Settings", "com.apple.systempreferences")]),
+            ws(4, "mail", [app("Mail", "com.apple.mail"), app("System Settings", "com.apple.systempreferences", floating: true)]),
         ]
         activeWorkspaceKey = "sample-1"
         activeWorkspaceLabel = "web"
@@ -192,12 +205,77 @@ final class IslandModel: ObservableObject {
                 self.scheduleDashboard()
             }
         } else {
-            hideWork = after(ms: config.trigger.hideDelayMs) { [weak self] in
-                guard let self, !self.modifierHeld, self.phase.isModifierPhase else { return }
-                self.setPhase(.hidden)
-                self.showNextNotification()
-            }
+            scheduleHide()
         }
+    }
+
+    private func scheduleHide() {
+        hideWork?.cancel()
+        hideWork = after(ms: config.trigger.hideDelayMs) { [weak self] in
+            guard let self, !self.modifierHeld, !self.pointerInside, self.phase.isModifierPhase else { return }
+            self.setPhase(.hidden)
+            self.showNextNotification()
+        }
+    }
+
+    /// Whether the island takes clicks right now.
+    var acceptsClicks: Bool { (phase.isModifierPhase || phase == .notification) && !isPreview }
+
+    func setPointerInside(_ inside: Bool) {
+        guard inside != pointerInside else { return }
+        pointerInside = inside
+        if phase == .notification {
+            // Keep the card up while the pointer rests on it.
+            if inside { notificationWork?.cancel() } else { scheduleNotificationEnd() }
+        } else if !inside && !modifierHeld && phase.isModifierPhase {
+            scheduleHide()
+        }
+    }
+
+    func open(_ n: IslandNotification) {
+        guard acceptsClicks else { return }
+        onOpenNotification?(n)
+        missedNotifications.removeAll { $0.id == n.id }
+        if phase == .notification {
+            notificationWork?.cancel()
+            pointerInside = false
+            if !showNextNotification() { setPhase(.hidden) }
+        } else {
+            closeAfterClick()
+        }
+    }
+
+    static let recentLimit = 30
+
+    func clearRecent() {
+        animate {
+            self.recentNotifications = []
+            self.missedNotifications = []
+        }
+        onRecentChange?()
+    }
+
+    // MARK: - Clicks
+
+    func activate(_ app: WorkspaceApp, in ws: WorkspaceItem) {
+        guard acceptsClicks else { return }
+        onActivateApp?(app, ws)
+        closeAfterClick()
+    }
+
+    func focus(_ ws: WorkspaceItem) {
+        guard acceptsClicks else { return }
+        onFocusWorkspace?(ws)
+        closeAfterClick()
+    }
+
+    private func closeAfterClick() {
+        showWork?.cancel()
+        hideWork?.cancel()
+        dashboardWork?.cancel()
+        pointerInside = false
+        setPhase(.hidden)
+        showNextNotification()
     }
 
     func present(_ event: IslandEvent) {
@@ -261,7 +339,10 @@ final class IslandModel: ObservableObject {
         guard allows(n) else { return }
         let c = config.notifications
         recentNotifications.insert(n, at: 0)
-        if recentNotifications.count > 8 { recentNotifications.removeLast(recentNotifications.count - 8) }
+        if recentNotifications.count > Self.recentLimit {
+            recentNotifications.removeLast(recentNotifications.count - Self.recentLimit)
+        }
+        onRecentChange?()
 
         // Same app again while its card is up: replace the card's content.
         if phase == .notification, let current = notification, current.groupKey == n.groupKey,
@@ -626,6 +707,7 @@ final class IslandModel: ObservableObject {
 
     static let appIconGap: CGFloat = 4
     static let groupPadding: CGFloat = 8
+    static let floatingSeparatorWidth: CGFloat = 1.5
 
     /// Width of one workspace group in the "apps" style:
     /// [pad] label [gap] icon icon … (+N) [pad]
@@ -637,6 +719,10 @@ final class IslandModel: ObservableObject {
         var width = Self.groupPadding * 2 + labelWidth
         if shown > 0 {
             width += CGFloat(shown) * (CGFloat(a.appIconSize) + Self.appIconGap)
+            let visible = apps.prefix(shown)
+            if visible.contains(where: \.isFloating) && visible.contains(where: { !$0.isFloating }) {
+                width += Self.floatingSeparatorWidth + Self.appIconGap
+            }
         }
         if apps.count > shown {
             width += pillWidth(for: "+\(apps.count - shown)") - 4
@@ -747,7 +833,21 @@ final class IslandModel: ObservableObject {
 
     static let indicatorEarWidth: CGFloat = 34
     static let notificationCardHeight: CGFloat = 78
-    static let dashboardHeight: CGFloat = 112
+    static let dashboardRowHeight: CGFloat = 22
+    static let dashboardHistoryRows = 3
+
+    /// Height under the workspace row in the dashboard: clock and events on
+    /// top, then up to three rows of notification history.
+    var dashboardHeight: CGFloat {
+        let items = config.dashboard.items.map { $0.lowercased() }
+        var height: CGFloat = 19
+        if items.contains("clock") || items.contains("events") { height += 64 }
+        if items.contains("notifications") {
+            let rows = max(1, min(recentNotifications.count, Self.dashboardHistoryRows))
+            height += CGFloat(rows) * Self.dashboardRowHeight + 8
+        }
+        return height
+    }
 
     var hiddenSize: CGSize {
         let ears = showsIndicator ? 2 * Self.indicatorEarWidth : 0
@@ -761,7 +861,7 @@ final class IslandModel: ObservableObject {
 
     var dashboardSize: CGSize {
         let width = max(compactSize.width, 380)
-        return CGSize(width: width, height: centerSize.height + Self.dashboardHeight)
+        return CGSize(width: width, height: centerSize.height + dashboardHeight)
     }
 
     var currentSize: CGSize {

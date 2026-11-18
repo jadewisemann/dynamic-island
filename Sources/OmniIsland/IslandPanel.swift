@@ -1,5 +1,11 @@
 import AppKit
+import Combine
 import SwiftUI
+
+/// Lets the first click on the (never key) panel reach SwiftUI.
+final class IslandHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
 
 /// Borderless, transparent, click-through panel that sits over the menu bar
 /// at the top-center of a screen and hosts the SwiftUI island.
@@ -43,12 +49,19 @@ final class IslandWindowController {
     private var screenObserver: NSObjectProtocol?
     private(set) var screen: NSScreen?
     private var preferredDisplayName: String?
+    private var phaseObserver: AnyCancellable?
+    private var mouseTimer: Timer?
 
     init(model: IslandModel) {
         self.model = model
-        let host = NSHostingView(rootView: IslandRootView(model: model))
+        let host = IslandHostingView(rootView: IslandRootView(model: model))
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
+        phaseObserver = model.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateMouseTracking() }
+            }
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -103,6 +116,50 @@ final class IslandWindowController {
         if panel.frame != frame {
             panel.setFrame(frame, display: true)
         }
+    }
+
+    // MARK: - Clicks
+
+    /// The panel stays click-through except while the workspace row is open
+    /// and the mouse is over the island itself, so the transparent margin
+    /// around it never swallows clicks meant for the menu bar or windows.
+    private func updateMouseTracking() {
+        if model.acceptsClicks {
+            if mouseTimer == nil {
+                let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.trackMouse() }
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                mouseTimer = timer
+            }
+            trackMouse()
+        } else {
+            mouseTimer?.invalidate()
+            mouseTimer = nil
+            panel.ignoresMouseEvents = true
+            model.setPointerInside(false)
+        }
+    }
+
+    private func trackMouse() {
+        let inside = islandFrame().insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+        if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
+        model.setPointerInside(inside)
+    }
+
+    /// The island's rectangle in screen coordinates.
+    private func islandFrame() -> NSRect {
+        let frame = panel.frame
+        let size = model.currentSize
+        let margin = Self.panelMargin
+        let midX: CGFloat
+        switch model.horizontalPosition {
+        case "left": midX = frame.minX + margin + size.width / 2
+        case "right": midX = frame.maxX - margin - size.width / 2
+        default: midX = frame.midX + model.panelOffset
+        }
+        let top = frame.maxY - model.currentTopOffset
+        return NSRect(x: midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
     }
 
     private func chooseScreen() -> NSScreen? {
