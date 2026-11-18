@@ -109,6 +109,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `behavior.showEventsWithoutModifier` | `true` | 키를 누르지 않았을 때 일어난 이동도 펼쳐서 보여 줍니다. |
 | `behavior.eventDurationMs` | `1700` | 펼쳐진 상태가 유지되는 시간입니다. |
 | `behavior.showWorkspaceSwitch` / `showWindowMove` | `true` | 이벤트 종류별로 켜고 끕니다. |
+| `behavior.windowMoveTrail` | `true` | 창이 다른 워크스페이스로 옮겨지면 워크스페이스 줄에서 그 앱 아이콘을 실은 방울이 원래 워크스페이스에서 새 워크스페이스로 흘러갑니다. 줄이 보일 때(`layout.eventPlacement`가 `replace`가 아닐 때나 트리거 키를 누르고 있을 때) 나타납니다. |
 | `behavior.showEmptyWorkspaces` | `false` | 창이 없는 워크스페이스도 목록에 보여 줍니다. |
 | `behavior.screen` | `"notch"` | `notch`(노치 있는 화면), `main`(메뉴 막대 화면), `active`(OmniWM이 조작 중인 모니터) 중 하나입니다. |
 | `behavior.hiddenStyle` | `"auto"` | `notch`는 숨었을 때 노치 크기의 검은 모양을 남기고, `fade`는 완전히 사라집니다. `auto`는 화면에 노치가 있는지 보고 고릅니다. |
@@ -154,6 +155,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `animation.speed` | `1` | 모든 움직임의 속도 배율입니다. |
 | `animation.contentTransition` | `"blur"` | 내용이 나타나는 방식입니다. `blur`, `fade`, `slide`, `none` 중 하나입니다. (예전의 `blurTransitions: false`는 `fade`로 읽습니다.) |
 | `animation.popOnEvent` | `true` | 이벤트가 들어올 때 살짝 커졌다가 돌아오는 효과입니다. |
+| `animation.liquid` | `true` | 끈적한 액체 효과입니다. 좌우 위젯 칸이 아일랜드와 떨어진 방울로 나뉘어, 나타날 때는 가운데에서 늘어나며 떨어져 나오고 사라질 때는 다시 녹아 들어갑니다. 이벤트로 아일랜드가 커져도 위젯 방울은 옆에 그대로 남습니다. 채우기(`fill`) 활성 표시도 다음 워크스페이스로 늘어나며 옮겨 갑니다. |
 
 설정 창의 테마 탭에는 기본 테마 6가지와, r/unixporn 등에서 많이 쓰는 커뮤니티 테마(Catppuccin Mocha·Latte, Nord, Gruvbox, Tokyo Night, Rosé Pine·Dawn, Dracula, Everforest, Kanagawa)가 프리셋으로 들어 있습니다. 지금 색 구성을 "내 테마"로 저장하거나 `.json` 파일로 내보내고 가져올 수도 있습니다.
 

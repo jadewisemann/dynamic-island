@@ -44,22 +44,31 @@ struct IslandView: View {
         let size = model.currentSize
         let topInset = isHidden || model.isFloating ? 0 : CGFloat(a.topCornerRadius)
 
+        let liquid = model.usesLiquid
         HStack(alignment: .top, spacing: 0) {
-            if model.showsSidePanels && model.leftPanelWidth > 0 {
-                SidePanel(model: model, items: model.leftPanelItems, edge: .leading)
-                    .frame(width: model.leftPanelWidth, height: model.panelUnit)
-                    .transition(fade)
-            }
-            centerColumn
-                .frame(maxWidth: .infinity)
-            if model.showsSidePanels && model.rightPanelWidth > 0 {
-                SidePanel(model: model, items: model.rightPanelItems, edge: .trailing)
-                    .frame(width: model.rightPanelWidth, height: model.panelUnit)
-                    .transition(fade)
+            if liquid {
+                if model.leftPanelWidth > 0 { liquidPanel(.leading) }
+                centerColumn
+                    .padding(.horizontal, topInset)
+                    .frame(maxWidth: .infinity)
+                if model.rightPanelWidth > 0 { liquidPanel(.trailing) }
+            } else {
+                if model.showsSidePanels && model.leftPanelWidth > 0 {
+                    SidePanel(model: model, items: model.leftPanelItems, edge: .leading)
+                        .frame(width: model.leftPanelWidth, height: model.panelUnit)
+                        .transition(fade)
+                }
+                centerColumn
+                    .frame(maxWidth: .infinity)
+                if model.showsSidePanels && model.rightPanelWidth > 0 {
+                    SidePanel(model: model, items: model.rightPanelItems, edge: .trailing)
+                        .frame(width: model.rightPanelWidth, height: model.panelUnit)
+                        .transition(fade)
+                }
             }
         }
-        .padding(.leading, model.showsSidePanels && model.leftPanelWidth > 0 ? 0 : topInset)
-        .padding(.trailing, model.showsSidePanels && model.rightPanelWidth > 0 ? 0 : topInset)
+        .padding(.leading, liquid || (model.showsSidePanels && model.leftPanelWidth > 0) ? 0 : topInset)
+        .padding(.trailing, liquid || (model.showsSidePanels && model.rightPanelWidth > 0) ? 0 : topInset)
         .frame(width: size.width, height: size.height, alignment: .top)
         .background {
             IslandBackground(model: model, solidBlack: isHidden && !model.hiddenStyleFades)
@@ -67,14 +76,21 @@ struct IslandView: View {
         .overlay(alignment: .bottom) {
             if (model.phase == .expanded || model.phase == .notification) && a.showEventProgress {
                 EventProgressBar(model: model)
+                    .padding(.leading, liquid && model.showsSidePanels ? model.leftPanelSpan : 0)
+                    .padding(.trailing, liquid && model.showsSidePanels ? model.rightPanelSpan : 0)
                     .id(model.eventSerial)
                     .transition(.opacity)
             }
         }
-        .clipShape(shape)
+        .modifier(IslandClip(liquid: liquid, shape: shape, geometry: liquidGeometry))
         .overlay {
             if !isHidden && colors.borderOpacity > 0 {
-                shape.stroke(model.palette.fill.opacity(colors.borderOpacity), lineWidth: 1)
+                if liquid {
+                    LiquidIslandShape(geometry: liquidGeometry)
+                        .stroke(model.palette.fill.opacity(colors.borderOpacity), lineWidth: 1)
+                } else {
+                    shape.stroke(model.palette.fill.opacity(colors.borderOpacity), lineWidth: 1)
+                }
             }
         }
         .shadow(
@@ -86,6 +102,41 @@ struct IslandView: View {
         .foregroundStyle(model.palette.text)
         .padding(.top, model.currentTopOffset)
         .offset(x: model.horizontalPosition == "center" ? model.panelOffset : 0)
+    }
+
+    /// Island and side panels for the liquid look; the panel progress is
+    /// what the mask animates while a panel splits off or melts back in.
+    private var liquidGeometry: LiquidIslandGeometry {
+        let out: CGFloat = model.showsSidePanels ? 1 : 0
+        return LiquidIslandGeometry(
+            leftProgress: model.leftPanelWidth > 0 ? out : 0,
+            rightProgress: model.rightPanelWidth > 0 ? out : 0,
+            topRadius: shape.topRadius,
+            bottomRadius: shape.bottomRadius,
+            topConvexRadius: shape.topConvexRadius,
+            leftWidth: model.leftPanelWidth,
+            rightWidth: model.rightPanelWidth,
+            gap: model.panelGap,
+            panelHeight: model.panelUnit
+        )
+    }
+
+    /// A side panel as its own drop. It grows out of the island's edge, so
+    /// its content stays pinned to the island side while the drop widens.
+    private func liquidPanel(_ edge: HorizontalEdge) -> some View {
+        let shown = model.showsSidePanels
+        let leading = edge == .leading
+        let width = leading ? model.leftPanelWidth : model.rightPanelWidth
+        return ZStack {
+            if shown {
+                SidePanel(model: model, items: leading ? model.leftPanelItems : model.rightPanelItems, edge: edge)
+                    .frame(width: width, height: model.panelUnit)
+                    .transition(fade)
+            }
+        }
+        .frame(width: shown ? width : 0, height: model.panelUnit, alignment: leading ? .trailing : .leading)
+        .clipped()
+        .padding(leading ? .trailing : .leading, shown ? model.panelGap : 0)
     }
 
     /// Notch strip, workspace row and whatever the phase adds below it.
@@ -203,6 +254,23 @@ struct IslandView: View {
                 .frame(maxWidth: wingSpace, alignment: .trailing)
         }
         .padding(.horizontal, 14)
+    }
+}
+
+/// Cuts the island to its outline: one notch shape, or the liquid drops.
+private struct IslandClip: ViewModifier {
+    let liquid: Bool
+    let shape: NotchShape
+    let geometry: LiquidIslandGeometry
+
+    func body(content: Content) -> some View {
+        if liquid {
+            content.mask {
+                Color.clear.modifier(LiquidIslandMask(geometry: geometry))
+            }
+        } else {
+            content.clipShape(shape)
+        }
     }
 }
 
@@ -430,6 +498,13 @@ struct WorkspaceRow: View {
                 }
             }
         }
+        .backgroundPreferenceValue(WorkspaceFrameKey.self) { anchors in
+            if model.usesLiquid || model.config.behavior.windowMoveTrail {
+                GeometryReader { proxy in
+                    RowLiquid(model: model, frames: anchors.mapValues { proxy[$0] })
+                }
+            }
+        }
         .padding(.horizontal, inset)
         .frame(maxWidth: .infinity, alignment: alignment == "leading" ? .leading : .center)
         .padding(.bottom, model.isFloating ? 0 : 4)
@@ -454,7 +529,8 @@ private struct ActiveHighlight: View {
             if !isActive || model.activeStyle != .fill {
                 shape.fill(inactiveFill)
             }
-            if isActive {
+            // The liquid layer behind the row draws the fill marker itself.
+            if isActive && !(model.usesLiquid && model.activeStyle == .fill) {
                 marker(accent: accent, glow: glow)
                     .matchedGeometryEffect(id: "active-workspace", in: ns)
             }
@@ -513,6 +589,7 @@ private struct WorkspacePill: View {
                 .foregroundStyle(isActive ? activeColor : model.palette.text.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
         }
         .frame(width: model.pillWidth(for: label), height: CGFloat(a.pillSize))
+        .anchorPreference(key: WorkspaceFrameKey.self, value: .bounds) { [ws.id: $0] }
         .contentShape(Capsule())
         .onTapGesture { model.focus(ws) }
         .scaleEffect(isTarget ? 1.08 : 1)
@@ -551,6 +628,7 @@ private struct WorkspaceGroup: View {
         .background {
             highlight(iconSize: iconSize, isEmpty: isEmpty)
         }
+        .anchorPreference(key: WorkspaceFrameKey.self, value: .bounds) { [ws.id: $0] }
         .scaleEffect(isTarget ? 1.06 : 1)
     }
 

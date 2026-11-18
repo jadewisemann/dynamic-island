@@ -11,8 +11,11 @@ struct SidePanel: View {
         let divider = model.palette.fill.opacity(0.1)
         // Keep content clear of the concave shoulders at the outer top corner.
         let shoulder = model.isFloating ? 0 : CGFloat(model.config.appearance.topCornerRadius)
+        // As a separate liquid drop the panel has shoulders on both sides
+        // and needs no divider against the island.
+        let liquid = model.usesLiquid
         HStack(spacing: 0) {
-            if edge == .trailing { divider.frame(width: 1).padding(.vertical, 10) }
+            if edge == .trailing && !liquid { divider.frame(width: 1).padding(.vertical, 10) }
             HStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     if index > 0 { divider.frame(width: 1).padding(.vertical, 12) }
@@ -20,8 +23,8 @@ struct SidePanel: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(edge == .leading ? Edge.Set.leading : Edge.Set.trailing, shoulder)
-            if edge == .leading { divider.frame(width: 1).padding(.vertical, 10) }
+            .padding(liquid ? Edge.Set.horizontal : (edge == .leading ? Edge.Set.leading : Edge.Set.trailing), shoulder)
+            if edge == .leading && !liquid { divider.frame(width: 1).padding(.vertical, 10) }
         }
     }
 }
