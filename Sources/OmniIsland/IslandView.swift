@@ -44,6 +44,50 @@ struct IslandView: View {
         let size = model.currentSize
         let topInset = isHidden || model.isFloating ? 0 : CGFloat(a.topCornerRadius)
 
+        HStack(alignment: .top, spacing: 0) {
+            if model.showsSidePanels {
+                SidePanel(model: model, items: model.leftPanelItems, edge: .leading)
+                    .frame(width: model.sidePanelWidth, height: model.panelUnit)
+                    .transition(fade)
+            }
+            centerColumn
+                .frame(maxWidth: .infinity)
+            if model.showsSidePanels {
+                SidePanel(model: model, items: model.rightPanelItems, edge: .trailing)
+                    .frame(width: model.sidePanelWidth, height: model.panelUnit)
+                    .transition(fade)
+            }
+        }
+        .padding(.horizontal, model.showsSidePanels ? 0 : topInset)
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .background {
+            IslandBackground(model: model, solidBlack: isHidden && !model.hiddenStyleFades)
+        }
+        .overlay(alignment: .bottom) {
+            if (model.phase == .expanded || model.phase == .notification) && a.showEventProgress {
+                EventProgressBar(model: model)
+                    .id(model.eventSerial)
+                    .transition(.opacity)
+            }
+        }
+        .clipShape(shape)
+        .overlay {
+            if !isHidden && colors.borderOpacity > 0 {
+                shape.stroke(model.palette.fill.opacity(colors.borderOpacity), lineWidth: 1)
+            }
+        }
+        .shadow(
+            color: .black.opacity(colors.shadow && !isHidden ? 0.35 : 0),
+            radius: isHidden ? 0 : 14, x: 0, y: 6
+        )
+        .opacity(isHidden && model.hiddenStyleFades ? 0 : 1)
+        .modifier(PopEffect(trigger: model.config.motion.popOnEvent ? model.eventSerial : 0))
+        .foregroundStyle(model.palette.text)
+        .padding(.top, model.currentTopOffset)
+    }
+
+    /// Notch strip, workspace row and whatever the phase adds below it.
+    private var centerColumn: some View {
         VStack(spacing: 0) {
             if !isHidden && !model.isFloating {
                 topStrip
@@ -80,32 +124,6 @@ struct IslandView: View {
                     .transition(.opacity)
             }
         }
-        .padding(.horizontal, topInset)
-        .frame(width: size.width, height: size.height, alignment: .top)
-        .background {
-            IslandBackground(model: model, solidBlack: isHidden && !model.hiddenStyleFades)
-        }
-        .overlay(alignment: .bottom) {
-            if (model.phase == .expanded || model.phase == .notification) && a.showEventProgress {
-                EventProgressBar(model: model)
-                    .id(model.eventSerial)
-                    .transition(.opacity)
-            }
-        }
-        .clipShape(shape)
-        .overlay {
-            if !isHidden && colors.borderOpacity > 0 {
-                shape.stroke(model.palette.fill.opacity(colors.borderOpacity), lineWidth: 1)
-            }
-        }
-        .shadow(
-            color: .black.opacity(colors.shadow && !isHidden ? 0.35 : 0),
-            radius: isHidden ? 0 : 14, x: 0, y: 6
-        )
-        .opacity(isHidden && model.hiddenStyleFades ? 0 : 1)
-        .modifier(PopEffect(trigger: model.config.motion.popOnEvent ? model.eventSerial : 0))
-        .foregroundStyle(model.palette.text)
-        .padding(.top, model.currentTopOffset)
     }
 
     @ViewBuilder private var eventHeader: some View {
@@ -172,7 +190,7 @@ struct IslandView: View {
     /// Row at notch height with a widget on each wing. The middle is covered
     /// by the hardware notch.
     private var topStrip: some View {
-        let wingSpace = max(0, (model.currentSize.width - model.geometry.width) / 2 - 20)
+        let wingSpace = max(0, (model.centerWidth - model.geometry.width) / 2 - 20)
         return HStack(spacing: 6) {
             WingView(model: model, widget: model.config.widgets.leftWing)
                 .frame(maxWidth: wingSpace, alignment: .leading)

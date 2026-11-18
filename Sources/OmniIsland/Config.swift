@@ -184,6 +184,14 @@ struct IslandConfig: Equatable {
         var eventFromTo = true
         /// 24h | 12h | 24hSeconds
         var clockFormat = "24h"
+        /// Square widget tiles attached to the left and right of the island
+        /// while the workspace row is shown:
+        /// clock | calendar | nextEvent | events | notifications
+        var leftPanel = ["clock"]
+        var rightPanel = ["calendar"]
+        /// Width of each side panel in squares (1–3). More widgets than
+        /// squares widen the panel; fewer share the width.
+        var panelUnits = 1.0
     }
 
     /// macOS notifications read from Notification Center banners.
@@ -223,7 +231,7 @@ struct IslandConfig: Equatable {
     /// Clock, today's events and recent notifications, shown when the
     /// modifier is held a little longer.
     struct Dashboard: Equatable {
-        var enabled = true
+        var enabled = false
         /// Extra hold time after the workspace row appears.
         var holdMs = 800.0
         /// clock | events | notifications, in display order.
@@ -505,6 +513,9 @@ extension IslandConfig {
         c.widgets.eventSubtitle = w.bool("eventSubtitle", c.widgets.eventSubtitle)
         c.widgets.eventFromTo = w.bool("eventFromTo", c.widgets.eventFromTo)
         c.widgets.clockFormat = w.string("clockFormat", c.widgets.clockFormat)
+        c.widgets.leftPanel = w.strings("leftPanel", c.widgets.leftPanel)
+        c.widgets.rightPanel = w.strings("rightPanel", c.widgets.rightPanel)
+        c.widgets.panelUnits = w.number("panelUnits", c.widgets.panelUnits)
 
         let no = r.sub("notifications")
         c.notifications.enabled = no.bool("enabled", c.notifications.enabled)
@@ -786,6 +797,12 @@ extension IslandConfig {
             "eventFromTo": \(b(w.eventFromTo)),
             // 24h | 12h | 24hSeconds
             "clockFormat": \(q(w.clockFormat)),
+            // 워크스페이스 줄이 보일 때 좌우에 붙는 정사각형 위젯 칸입니다. 비우면 그쪽 칸이 없습니다.
+            // clock(시계) | calendar(달력) | nextEvent(다음 일정) | events(오늘 일정) | notifications(최근 알림)
+            "leftPanel": \(list(w.leftPanel)),
+            "rightPanel": \(list(w.rightPanel)),
+            // 한쪽 칸의 너비를 정사각형 몇 칸으로 할지 정합니다 (1~3).
+            "panelUnits": \(n(w.panelUnits)),
           },
 
           "notifications": {

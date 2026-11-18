@@ -649,7 +649,30 @@ final class IslandModel: ObservableObject {
         config.layout.widthMode.lowercased() == "fixed" ? CGFloat(config.layout.fixedWidth) : 0
     }
 
-    var compactSize: CGSize {
+    // MARK: Side panels
+
+    /// Side length of one square widget tile: the height of the island
+    /// while the workspace row is shown.
+    var panelUnit: CGFloat { centerSize.height }
+
+    var leftPanelItems: [String] { config.widgets.leftPanel.filter { !$0.isEmpty } }
+    var rightPanelItems: [String] { config.widgets.rightPanel.filter { !$0.isEmpty } }
+
+    /// Width of one side panel. Both sides use the wider of the two so the
+    /// workspace row stays centered under the notch.
+    var sidePanelWidth: CGFloat {
+        let units = min(max(Int(config.widgets.panelUnits.rounded()), 1), 3)
+        let count = max(leftPanelItems.count, rightPanelItems.count)
+        guard count > 0 else { return 0 }
+        return CGFloat(max(units, count)) * panelUnit
+    }
+
+    var showsSidePanels: Bool {
+        (phase == .compact || phase == .dashboard) && sidePanelWidth > 0
+    }
+
+    /// The workspace row part of the island, without side panels.
+    var centerSize: CGSize {
         let padding = contentPadding * 2
         if isFloating {
             let wings = leftWingWidth + rightWingWidth
@@ -662,9 +685,19 @@ final class IslandModel: ObservableObject {
         return CGSize(width: width, height: geometry.height + rowHeight)
     }
 
+    var compactSize: CGSize {
+        let center = centerSize
+        return CGSize(width: center.width + 2 * sidePanelWidth, height: center.height)
+    }
+
+    /// Width available to the middle column in the current phase.
+    var centerWidth: CGFloat {
+        showsSidePanels ? currentSize.width - 2 * sidePanelWidth : currentSize.width
+    }
+
     var expandedSize: CGSize {
         let a = config.appearance
-        let width = max(CGFloat(a.expandedWidth), compactSize.width)
+        let width = max(CGFloat(a.expandedWidth), centerSize.width)
         let row = eventPlacement == .replace ? 0 : rowHeight
         return CGSize(width: width, height: topStripHeight + row + CGFloat(a.expandedHeaderHeight))
     }
@@ -679,13 +712,13 @@ final class IslandModel: ObservableObject {
     }
 
     var notificationSize: CGSize {
-        let width = max(CGFloat(config.appearance.expandedWidth), compactSize.width, 360)
+        let width = max(CGFloat(config.appearance.expandedWidth), centerSize.width, 360)
         return CGSize(width: width, height: topStripHeight + Self.notificationCardHeight)
     }
 
     var dashboardSize: CGSize {
         let width = max(compactSize.width, 380)
-        return CGSize(width: width, height: compactSize.height + Self.dashboardHeight)
+        return CGSize(width: width, height: centerSize.height + Self.dashboardHeight)
     }
 
     var currentSize: CGSize {

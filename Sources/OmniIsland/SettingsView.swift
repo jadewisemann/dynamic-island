@@ -763,6 +763,23 @@ private struct WidgetSettings: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Picker("한쪽 칸 너비", selection: $model.draft.widgets.panelUnits) {
+                    Text("1칸 (정사각형)").tag(1.0)
+                    Text("2칸").tag(2.0)
+                    Text("3칸").tag(3.0)
+                }
+                .pickerStyle(.segmented)
+                slotPickers("왼쪽", side: \.leftPanel)
+                slotPickers("오른쪽", side: \.rightPanel)
+            } header: {
+                Text("좌우 위젯 칸")
+            } footer: {
+                Text("트리거 키를 눌러 워크스페이스 줄이 나타날 때 아일랜드 양옆에 붙습니다. 칸보다 위젯이 적으면 남는 너비를 나눠 쓰고, 2칸 이상이면 위젯이 넓은 모양으로 바뀝니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("워크스페이스 줄") {
                 Picker("표시 방식", selection: $model.draft.appearance.workspaceStyle) {
                     Text("번호와 앱 아이콘").tag("apps")
@@ -810,9 +827,42 @@ private struct WidgetSettings: View {
         .formStyle(.grouped)
     }
 
+    private var panelSlots: Int { min(max(Int(model.draft.widgets.panelUnits.rounded()), 1), 3) }
+
+    @ViewBuilder
+    private func slotPickers(_ title: String, side: WritableKeyPath<IslandConfig.Widgets, [String]>) -> some View {
+        let count = max(panelSlots, model.draft.widgets[keyPath: side].count)
+        ForEach(0..<count, id: \.self) { index in
+            Picker(count == 1 ? title : "\(title) \(index + 1)", selection: slotBinding(side, index)) {
+                Text("없음").tag("")
+                Text("시계").tag("clock")
+                Text("달력").tag("calendar")
+                Text("다음 일정").tag("nextEvent")
+                Text("오늘 일정").tag("events")
+                Text("최근 알림").tag("notifications")
+            }
+        }
+    }
+
+    private func slotBinding(_ side: WritableKeyPath<IslandConfig.Widgets, [String]>, _ index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                let items = model.draft.widgets[keyPath: side]
+                return index < items.count ? items[index] : ""
+            },
+            set: { value in
+                var items = model.draft.widgets[keyPath: side]
+                while items.count <= index { items.append("") }
+                items[index] = value
+                model.draft.widgets[keyPath: side] = items.filter { !$0.isEmpty }
+            }
+        )
+    }
+
     private var usesClock: Bool {
         let w = model.draft.widgets
         return w.leftWing.lowercased() == "clock" || w.rightWing.lowercased() == "clock"
+            || (w.leftPanel + w.rightPanel).contains("clock")
     }
 
     private func wingPicker(_ title: String, selection: Binding<String>) -> some View {

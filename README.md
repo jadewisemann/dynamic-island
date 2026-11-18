@@ -131,6 +131,8 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `layout.rowAlignment` / `contentPadding` | `"center"` / `20` | 워크스페이스 줄 정렬(`center`, `leading`, `spread`)과 안쪽 여백입니다. |
 | `layout.eventPlacement` | `"below"` | 이동 알림을 워크스페이스 줄 아래(`below`), 위(`above`), 또는 줄 대신(`replace`) 보여 줍니다. |
 | `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `nextEvent`(다음 일정), `notifications`(놓친 알림 수), `none` 중 하나입니다. |
+| `widgets.leftPanel` / `rightPanel` | `["clock"]` / `["calendar"]` | 워크스페이스 줄이 보일 때 아일랜드 양옆에 붙는 정사각형 위젯 칸입니다. `clock`, `calendar`, `nextEvent`, `events`, `notifications`를 순서대로 적고, 비우면 그쪽 칸이 없습니다. |
+| `widgets.panelUnits` | `1` | 한쪽 칸의 너비를 정사각형 1~3칸으로 정합니다. 2칸 이상이면 위젯이 넓은 모양(큰 시계, 2주 달력, 일정 목록)으로 바뀝니다. |
 | `widgets.workspaceLabel` | `"name"` | 워크스페이스를 OmniWM 표시 이름(`name`), 번호(`number`), 번호와 이름(`both`)으로 보여 줍니다. |
 | `widgets.eventIcon` / `eventSubtitle` / `eventFromTo` | `true` | 이동 알림 카드의 아이콘, 부제목, "출발 → 도착" 표시를 켜고 끕니다. |
 | `widgets.clockFormat` | `"24h"` | `24h`, `12h`, `24hSeconds` 중 하나입니다. |
@@ -143,7 +145,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `notifications.mergeWindowMs` | `3000` | 같은 앱에서 이 시간 안에 온 알림은 한 장으로 합칩니다. |
 | `calendar.enabled` / `calendars` | `false` / `[]` | 캘린더 일정을 읽습니다. 켜면 캘린더 접근 권한을 묻습니다. 비워 두면 모든 캘린더를 씁니다. |
 | `calendar.alertMinutes` / `showAlerts` / `includeAllDay` | `[5, 0]` / `true` / `false` | 일정 시작 몇 분 전에 카드를 띄울지 정합니다. |
-| `dashboard.enabled` / `holdMs` / `items` | `true` / `800` / `["clock", "events", "notifications"]` | 트리거 키를 더 오래 누르면 큰 시계, 오늘 남은 일정, 최근 알림을 보여 줍니다. |
+| `dashboard.enabled` / `holdMs` / `items` | `false` / `800` / `["clock", "events", "notifications"]` | 트리거 키를 더 오래 누르면 큰 시계, 오늘 남은 일정, 최근 알림을 보여 줍니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
 | `animation.durationMs` | `380` | `spring`이 아닌 스타일의 재생 시간입니다. |
