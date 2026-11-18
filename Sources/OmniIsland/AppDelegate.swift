@@ -95,7 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         modifiers.configure(modifier: configStore.config.trigger.modifier,
-                            exactMatch: configStore.config.trigger.exactMatch)
+                            exactMatch: configStore.config.trigger.exactMatch,
+                            allowShift: configStore.config.trigger.allowShift)
         modifiers.onChange = { [weak self] held in
             self?.model.modifierChanged(held: held)
             if held { self?.badgeMonitor.refresh() }
@@ -194,7 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let previous = model.config
         model.apply(config: config)
         model.update(from: tracker)
-        modifiers.configure(modifier: config.trigger.modifier, exactMatch: config.trigger.exactMatch)
+        modifiers.configure(modifier: config.trigger.modifier, exactMatch: config.trigger.exactMatch,
+                            allowShift: config.trigger.allowShift)
         configureBadges(config)
         configureWidgets(config)
         configureLauncher(config)

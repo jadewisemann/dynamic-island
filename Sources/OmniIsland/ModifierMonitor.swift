@@ -14,14 +14,16 @@ final class ModifierMonitor {
 
     private var requirement = ModifierRequirement.parse("option")
     private var exactMatch = true
+    private var allowShift = true
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var pollTimer: Timer?
     private var trustCheckTimer: Timer?
 
-    func configure(modifier: String, exactMatch: Bool) {
+    func configure(modifier: String, exactMatch: Bool, allowShift: Bool) {
         requirement = ModifierRequirement.parse(modifier)
         self.exactMatch = exactMatch
+        self.allowShift = allowShift
         evaluate(rawFlags: UInt64(CGEventSource.flagsState(.combinedSessionState).rawValue))
     }
 
@@ -89,7 +91,7 @@ final class ModifierMonitor {
     }
 
     private func evaluate(rawFlags: UInt64) {
-        let held = requirement.matches(rawFlags: rawFlags, exact: exactMatch)
+        let held = requirement.matches(rawFlags: rawFlags, exact: exactMatch, allowShift: allowShift)
         guard held != isHeld else { return }
         isHeld = held
         onChange?(held)
@@ -148,14 +150,15 @@ struct ModifierRequirement {
         return ModifierRequirement(parts: parts)
     }
 
-    func matches(rawFlags: UInt64, exact: Bool) -> Bool {
+    func matches(rawFlags: UInt64, exact: Bool, allowShift: Bool = false) -> Bool {
         for part in parts {
             guard rawFlags & part.generic != 0 else { return false }
             if let device = part.device, rawFlags & device == 0 { return false }
         }
         if exact {
-            let required = parts.reduce(UInt64(0)) { $0 | $1.generic }
-            if rawFlags & Self.allGeneric & ~required != 0 { return false }
+            var allowed = parts.reduce(UInt64(0)) { $0 | $1.generic }
+            if allowShift { allowed |= Self.shift }
+            if rawFlags & Self.allGeneric & ~allowed != 0 { return false }
         }
         return true
     }
