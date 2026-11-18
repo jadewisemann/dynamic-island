@@ -42,6 +42,8 @@ struct IslandConfig: Equatable {
         var eventDurationMs = 1700.0
         var showWorkspaceSwitch = true
         var showWindowMove = true
+        /// Show a moved window as a drop flowing between workspaces in the row.
+        var windowMoveTrail = true
         /// Show workspaces with no windows in the workspace row.
         var showEmptyWorkspaces = false
         /// Which screen hosts the island: notch | main | active
@@ -253,6 +255,9 @@ struct IslandConfig: Equatable {
         var contentTransition = "blur"
         /// Small scale "pop" when the island expands for an event.
         var popOnEvent = true
+        /// Gooey, liquid-like motion: side panels split off as drops and the
+        /// active workspace highlight stretches between workspaces.
+        var liquid = true
     }
 }
 
@@ -450,6 +455,7 @@ extension IslandConfig {
         c.behavior.eventDurationMs = b.number("eventDurationMs", c.behavior.eventDurationMs)
         c.behavior.showWorkspaceSwitch = b.bool("showWorkspaceSwitch", c.behavior.showWorkspaceSwitch)
         c.behavior.showWindowMove = b.bool("showWindowMove", c.behavior.showWindowMove)
+        c.behavior.windowMoveTrail = b.bool("windowMoveTrail", c.behavior.windowMoveTrail)
         c.behavior.showEmptyWorkspaces = b.bool("showEmptyWorkspaces", c.behavior.showEmptyWorkspaces)
         c.behavior.screen = b.string("screen", c.behavior.screen)
         c.behavior.hiddenStyle = b.string("hiddenStyle", c.behavior.hiddenStyle)
@@ -551,6 +557,7 @@ extension IslandConfig {
         if !n.bool("blurTransitions", true) { c.motion.contentTransition = "fade" }
         c.motion.contentTransition = n.string("contentTransition", c.motion.contentTransition)
         c.motion.popOnEvent = n.bool("popOnEvent", c.motion.popOnEvent)
+        c.motion.liquid = n.bool("liquid", c.motion.liquid)
 
         return c
     }
@@ -702,6 +709,8 @@ extension IslandConfig {
             "eventDurationMs": \(n(be.eventDurationMs)),
             "showWorkspaceSwitch": \(b(be.showWorkspaceSwitch)),
             "showWindowMove": \(b(be.showWindowMove)),
+            // 창이 옮겨질 때 워크스페이스 줄에서 방울이 흘러가듯 보여 줍니다.
+            "windowMoveTrail": \(b(be.windowMoveTrail)),
             "showEmptyWorkspaces": \(b(be.showEmptyWorkspaces)),
             // notch | main | active (OmniWM이 지금 조작 중인 모니터)
             "screen": \(q(be.screen)),
@@ -858,6 +867,8 @@ extension IslandConfig {
             // 내용이 나타나는 방식: blur | fade | slide | none
             "contentTransition": \(q(an.contentTransition)),
             "popOnEvent": \(b(an.popOnEvent)),
+            // 좌우 칸이 액체 방울처럼 떨어져 나오고, 활성 표시가 끈적하게 늘어나며 옮겨 갑니다.
+            "liquid": \(b(an.liquid)),
           },
         }
 

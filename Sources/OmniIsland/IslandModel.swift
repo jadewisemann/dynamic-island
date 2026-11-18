@@ -28,7 +28,19 @@ struct NotchGeometry: Equatable {
 /// All state the SwiftUI view renders, plus the show/hide state machine.
 @MainActor
 final class IslandModel: ObservableObject {
-    @Published private(set) var phase: IslandPhase = .hidden
+    @Published private(set) var phase: IslandPhase = .hidden {
+        didSet {
+            // Side panels come out with the workspace row and stay beside the
+            // island while it grows for an event; hiding takes them back in.
+            switch phase {
+            case .compact, .dashboard: panelsOut = true
+            case .hidden: panelsOut = false
+            case .expanded, .notification: break
+            }
+        }
+    }
+    /// Whether the side panels were out when the island grew for an event.
+    private var panelsOut = false
     @Published private(set) var workspaces: [WorkspaceItem] = []
     @Published private(set) var activeWorkspaceKey: String?
     @Published private(set) var activeWorkspaceLabel: String?
@@ -668,14 +680,38 @@ final class IslandModel: ObservableObject {
     var leftPanelWidth: CGFloat { panelWidth(leftPanelItems) }
     var rightPanelWidth: CGFloat { panelWidth(rightPanelItems) }
 
+    // MARK: Liquid
+
+    /// Side panels split off the island as separate drops, and the active
+    /// workspace highlight stretches between workspaces like a liquid.
+    var usesLiquid: Bool {
+        config.motion.liquid && config.motion.style.lowercased() != "none"
+    }
+
+    static let liquidGap: CGFloat = 10
+
+    /// Space between the island and a side panel; zero keeps them as one shape.
+    var panelGap: CGFloat { usesLiquid ? Self.liquidGap : 0 }
+
+    /// Width a side panel takes, including the gap to the island.
+    var leftPanelSpan: CGFloat { leftPanelWidth > 0 ? leftPanelWidth + panelGap : 0 }
+    var rightPanelSpan: CGFloat { rightPanelWidth > 0 ? rightPanelWidth + panelGap : 0 }
+    private var panelSpans: CGFloat { leftPanelSpan + rightPanelSpan }
+
     var showsSidePanels: Bool {
-        (phase == .compact || phase == .dashboard) && leftPanelWidth + rightPanelWidth > 0
+        guard leftPanelWidth + rightPanelWidth > 0 else { return false }
+        switch phase {
+        case .compact, .dashboard: return true
+        // As separate drops the panels can stay beside a taller island.
+        case .expanded, .notification: return usesLiquid && panelsOut
+        case .hidden: return false
+        }
     }
 
     /// Shift that keeps the workspace row under the notch when the two
     /// panels differ in width (e.g. a panel on the right only).
     var panelOffset: CGFloat {
-        showsSidePanels ? (rightPanelWidth - leftPanelWidth) / 2 : 0
+        showsSidePanels ? (rightPanelSpan - leftPanelSpan) / 2 : 0
     }
 
     /// The workspace row part of the island, without side panels.
@@ -694,12 +730,12 @@ final class IslandModel: ObservableObject {
 
     var compactSize: CGSize {
         let center = centerSize
-        return CGSize(width: center.width + leftPanelWidth + rightPanelWidth, height: center.height)
+        return CGSize(width: center.width + panelSpans, height: center.height)
     }
 
     /// Width available to the middle column in the current phase.
     var centerWidth: CGFloat {
-        showsSidePanels ? currentSize.width - leftPanelWidth - rightPanelWidth : currentSize.width
+        showsSidePanels ? currentSize.width - panelSpans : currentSize.width
     }
 
     var expandedSize: CGSize {
@@ -732,10 +768,15 @@ final class IslandModel: ObservableObject {
         switch phase {
         case .hidden: return hiddenSize
         case .compact: return compactSize
-        case .expanded: return expandedSize
-        case .notification: return notificationSize
+        case .expanded: return withPanels(expandedSize)
+        case .notification: return withPanels(notificationSize)
         case .dashboard: return dashboardSize
         }
+    }
+
+    /// Adds the side panels to an event size when they stay out beside it.
+    private func withPanels(_ size: CGSize) -> CGSize {
+        showsSidePanels ? CGSize(width: size.width + panelSpans, height: size.height) : size
     }
 
     /// Distance from the top of the screen to the island's top edge.
@@ -747,8 +788,12 @@ final class IslandModel: ObservableObject {
     /// panel is sized from this.
     var maximumSize: CGSize {
         // Room for the offset when only one side has a panel.
-        let shifted = CGSize(width: centerSize.width + 2 * max(leftPanelWidth, rightPanelWidth), height: 0)
-        let sizes = [expandedSize, compactSize, notificationSize, dashboardSize, shifted]
+        let side = 2 * max(leftPanelSpan, rightPanelSpan)
+        let shifted = CGSize(width: centerSize.width + side, height: 0)
+        // Liquid panels can also sit beside the event sizes.
+        let extra = usesLiquid ? side : 0
+        let events = [expandedSize, notificationSize].map { CGSize(width: $0.width + extra, height: $0.height) }
+        let sizes = events + [compactSize, dashboardSize, shifted]
         let height = (sizes.map(\.height).max() ?? 0) + (isFloating ? floatingTop : 0)
         let width = sizes.map(\.width).max() ?? 0
         return CGSize(width: max(width, 520), height: max(height, geometry.height))

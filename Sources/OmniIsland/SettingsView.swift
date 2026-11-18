@@ -338,6 +338,7 @@ private struct GeneralSettings: View {
             Section("이동 알림") {
                 Toggle("워크스페이스 전환 보여 주기", isOn: $model.draft.behavior.showWorkspaceSwitch)
                 Toggle("창 이동 보여 주기", isOn: $model.draft.behavior.showWindowMove)
+                Toggle("옮겨진 창을 워크스페이스 줄에서 흘러가듯 보여 주기", isOn: $model.draft.behavior.windowMoveTrail)
                 Toggle("키를 누르지 않았을 때도 보여 주기", isOn: $model.draft.behavior.showEventsWithoutModifier)
                 SliderRow(title: "펼쳐진 상태 유지 시간", value: $model.draft.behavior.eventDurationMs,
                           range: 500...5000, step: 100, unit: "ms")
@@ -1171,6 +1172,10 @@ private struct AnimationSettings: View {
                     Text("없음").tag("none")
                 }
                 Toggle("이벤트가 들어올 때 살짝 튀어오르기", isOn: $model.draft.motion.popOnEvent)
+                Toggle("끈적한 액체처럼 움직이기", isOn: $model.draft.motion.liquid)
+                Text("좌우 위젯 칸이 아일랜드에서 방울처럼 떨어져 나오고, 활성 워크스페이스 표시가 늘어나며 옮겨 갑니다.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
