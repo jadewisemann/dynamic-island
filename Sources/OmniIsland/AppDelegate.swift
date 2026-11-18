@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let tracker = WMStateTracker()
     private let client = OmniWMClient()
     private let modifiers = ModifierMonitor()
+    private let hotKeys = HotKeyMonitor()
     private let badgeMonitor = DockBadgeMonitor()
     private let notificationWatcher = NotificationWatcher()
     private let calendarProvider = CalendarProvider()
@@ -72,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onFocusWorkspace = { [weak self] ws in
             self?.focusWorkspace(ws)
         }
+        setUpLauncher()
         model.onOpenNotification = { [weak self] n in
             self?.openNotification(n)
         }
@@ -189,6 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modifiers.configure(modifier: config.trigger.modifier, exactMatch: config.trigger.exactMatch)
         configureBadges(config)
         configureWidgets(config)
+        configureLauncher(config)
         windowController?.reposition()
         if previous.omniwmctlPath != config.omniwmctlPath || previous.socketPath != config.socketPath {
             if !isDemo {
@@ -202,6 +205,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsModel?.configError = configStore.lastError
         configErrorMenuItem?.title = configStore.lastError ?? ""
         configErrorMenuItem?.isHidden = configStore.lastError == nil
+    }
+
+    // MARK: - Launcher
+
+    private func setUpLauncher() {
+        hotKeys.onPress = { [weak self] in self?.model.toggleLauncher() }
+        configureLauncher(configStore.config)
+        let launcher = model.launcher
+        launcher.windowsProvider = { [weak self] in
+            guard let self else { return [] }
+            return self.tracker.windows.compactMap { w -> LauncherWindow? in
+                guard let id = w.id, w.isScratchpad != true else { return nil }
+                return LauncherWindow(id: id, appName: w.app?.name ?? "?", bundleId: w.app?.bundleId,
+                                      title: w.title ?? "", workspaceLabel: w.workspace.map {
+                                          self.model.label(for: $0)
+                                      } ?? "?")
+            }
+        }
+        launcher.onOpenApp = { app in
+            NSWorkspace.shared.openApplication(at: app.url, configuration: NSWorkspace.OpenConfiguration())
+        }
+        launcher.onRevealApp = { app in
+            NSWorkspace.shared.activateFileViewerSelecting([app.url])
+        }
+        launcher.onFocusWindow = { [weak self] window in
+            self?.runWindowCommand(["window", "navigate", window.id], fallbackBundleId: window.bundleId)
+        }
+        launcher.onSummonWindow = { [weak self] window in
+            self?.runWindowCommand(["window", "summon-right", window.id], fallbackBundleId: window.bundleId)
+        }
+    }
+
+    private func configureLauncher(_ config: IslandConfig) {
+        let wanted = (config.launcher.enabled ? config.launcher.hotkey : "").trimmingCharacters(in: .whitespaces)
+        if hotKeys.registeredSpec == wanted || (wanted.isEmpty && hotKeys.registeredSpec == nil) { return }
+        hotKeys.register(wanted)
+    }
+
+    private func runWindowCommand(_ arguments: [String], fallbackBundleId: String?) {
+        let fallback = { [weak self] in
+            if let bundleId = fallbackBundleId { self?.activateApp(bundleId: bundleId) }
+        }
+        guard !isDemo else {
+            fallback()
+            return
+        }
+        let config = configStore.config
+        OmniWMClient.run(arguments, executablePath: config.omniwmctlPath, socketPath: config.socketPath) { ok in
+            if !ok { fallback() }
+        }
     }
 
     private func configureBadges(_ config: IslandConfig) {
