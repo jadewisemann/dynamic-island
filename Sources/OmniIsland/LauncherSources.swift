@@ -217,7 +217,7 @@ enum WebSearch {
     }
 
     /// Google's completions (the endpoint Firefox uses); nil on failure.
-    static func suggestions(for text: String, completion: @escaping @MainActor ([String]?) -> Void) {
+    @MainActor static func suggestions(for text: String, completion: @escaping @MainActor ([String]?) -> Void) {
         guard eligible(text),
               var components = URLComponents(string: "https://suggestqueries.google.com/complete/search") else {
             completion(nil)
@@ -311,7 +311,7 @@ enum Currency {
         return CurrencyQuery(amount: amount, from: from, to: to)
     }
 
-    static func fetch(_ q: CurrencyQuery, completion: @escaping @MainActor (CurrencyAnswer?) -> Void) {
+    @MainActor static func fetch(_ q: CurrencyQuery, completion: @escaping @MainActor (CurrencyAnswer?) -> Void) {
         var components = URLComponents(string: "https://api.frankfurter.dev/v1/latest")
         components?.queryItems = [
             URLQueryItem(name: "amount", value: Calculator.plain(q.amount)),
