@@ -94,12 +94,15 @@ enum SettingsPanes {
     /// pane, which would list under nearly every query.
     private static let minScore = 500
 
-    static func search(_ query: String) -> [(SettingsPane, FuzzyMatch)] {
+    /// Panes this Mac has, in the order of the list above.
+    static var available: [SettingsPane] { prepared.map(\.pane) }
+
+    static func search(_ query: String, minLength: Int = 2) -> [(SettingsPane, FuzzyMatch)] {
         var q = query.trimmingCharacters(in: .whitespaces)
         for tail in [" settings", " preferences", " 설정"] where q.lowercased().hasSuffix(tail) && q.count > tail.count {
             q = String(q.dropLast(tail.count)).trimmingCharacters(in: .whitespaces)
         }
-        guard q.count >= 2 else { return [] }
+        guard q.count >= minLength else { return [] }
         var result: [(SettingsPane, FuzzyMatch)] = []
         for p in prepared {
             var best: FuzzyMatch?

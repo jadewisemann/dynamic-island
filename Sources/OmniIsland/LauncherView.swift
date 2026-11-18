@@ -20,34 +20,55 @@ struct LauncherView: View {
                     .foregroundStyle(palette.secondary)
                     .frame(height: LauncherModel.messageHeight)
             }
-            ForEach(Array(launcher.results.enumerated()), id: \.element.id) { index, item in
-                if let section = item.section,
-                   index == 0 || launcher.results[index - 1].section != section {
-                    Text(section)
-                        .font(model.textFont(size: 11, weight: .semibold))
-                        .foregroundStyle(palette.secondary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .frame(height: LauncherModel.headerHeight)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(launcher.results.enumerated()), id: \.element.id) { index, item in
+                            if let section = item.section,
+                               index == 0 || launcher.results[index - 1].section != section {
+                                Text(section)
+                                    .font(model.textFont(size: 11, weight: .semibold))
+                                    .foregroundStyle(palette.secondary)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 14)
+                                    .frame(height: LauncherModel.headerHeight)
+                            }
+                            row(item, index: index)
+                                .id(item.id)
+                        }
+                    }
                 }
-                row(item, index: index)
+                .onChange(of: launcher.selection) { _, selected in
+                    guard launcher.results.indices.contains(selected) else { return }
+                    proxy.scrollTo(launcher.results[selected].id)
+                }
+                .onChange(of: launcher.modeId) { _, _ in
+                    if let first = launcher.results.first { proxy.scrollTo(first.id, anchor: .top) }
+                }
             }
-            Spacer(minLength: 0)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
     }
 
     @ViewBuilder private func row(_ item: LauncherItem, index: Int) -> some View {
-        let base = LauncherRow(model: model, item: item, index: index, selected: index == launcher.selection)
+        let base = LauncherRow(model: model, item: item, index: index, selected: index == launcher.selection,
+                               marked: launcher.isMarked(item))
             .frame(height: LauncherModel.rowHeight)
             .contentShape(Rectangle())
             .onHover { inside in if inside { launcher.selection = index } }
-            .onTapGesture { launcher.activate(index: index) }
-        if case .shelf(let shelfItem) = item.kind, let provide = launcher.shelfDragProvider {
-            // Drag a shelf item straight into another app.
-            base.onDrag { provide(shelfItem) }
+            .onTapGesture {
+                if NSEvent.modifierFlags.contains(.command) && launcher.allowsMarking {
+                    launcher.toggleMark(index: index)
+                } else {
+                    launcher.activate(index: index)
+                }
+            }
+        if case .shelf = item.kind {
+            // Drag a copied item straight into another app.
+            base.onDrag { launcher.dragProvider(item) ?? NSItemProvider() }
         } else {
             base
         }
@@ -55,19 +76,41 @@ struct LauncherView: View {
 
     private var field: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(palette.secondary)
+            if let mode = launcher.mode {
+                HStack(spacing: 5) {
+                    Image(systemName: mode.symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(mode.name)
+                        .font(model.textFont(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(palette.activeText)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(Capsule().fill(palette.accent.opacity(0.9)))
+                .fixedSize()
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+            }
             ZStack(alignment: .leading) {
                 if launcher.query.isEmpty {
-                    Text("앱, 창, 파일, 설정, 선반을 검색하거나 웹에서 찾습니다")
+                    Text(launcher.placeholder)
                         .font(model.textFont(size: 15, weight: .regular))
                         .foregroundStyle(palette.secondary)
+                        .lineLimit(1)
                         .allowsHitTesting(false)
                 }
                 LauncherField(launcher: launcher, textColor: NSColor(palette.text),
                               caretColor: NSColor(palette.accent))
                     .frame(height: 22)
+            }
+            if !launcher.marked.isEmpty {
+                Text("\(launcher.marked.count)개 선택")
+                    .font(model.textFont(size: 11, weight: .semibold))
+                    .foregroundStyle(palette.accent)
+                    .fixedSize()
             }
             Text(HotKeyMonitor.symbols(model.config.launcher.hotkey))
                 .font(model.textFont(size: 11, weight: .medium))
@@ -87,6 +130,7 @@ private struct LauncherRow: View {
     let item: LauncherItem
     let index: Int
     let selected: Bool
+    var marked = false
 
     var body: some View {
         let p = model.palette
@@ -107,6 +151,11 @@ private struct LauncherRow: View {
                 }
             }
             Spacer(minLength: 8)
+            if marked {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(selected ? p.activeText : p.accent)
+            }
             Text(index < 9 ? "\(item.kindLabel)  ⌘\(index + 1)" : item.kindLabel)
                 .font(model.textFont(size: 11, weight: .regular))
                 .foregroundStyle(secondary)
@@ -115,7 +164,7 @@ private struct LauncherRow: View {
         .frame(maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected ? p.accent.opacity(0.9) : .clear)
+                .fill(selected ? p.accent.opacity(0.9) : marked ? p.accent.opacity(0.22) : .clear)
         )
     }
 
@@ -137,6 +186,8 @@ private struct LauncherRow: View {
             symbol("capsule.fill")
         case .web(_, let name):
             symbol(name)
+        case .plugin(let id):
+            symbol(model.launcher.plugin(id: id)?.symbol ?? "square.grid.2x2")
         case .shelf(let shelfItem):
             if let image = ShelfThumbnails.image(shelfItem) {
                 Image(nsImage: image)
@@ -249,12 +300,19 @@ struct LauncherField: NSViewRepresentable {
                 launcher.move(-1)
             case #selector(NSResponder.moveDown(_:)):
                 launcher.move(1)
+            case #selector(NSResponder.moveUpAndModifySelection(_:)):
+                return launcher.extend(-1)
+            case #selector(NSResponder.moveDownAndModifySelection(_:)):
+                return launcher.extend(1)
+            case #selector(NSResponder.deleteBackward(_:)):
+                // ⌫ on an empty field leaves the built-in app.
+                guard let view, view.string.isEmpty, !view.hasMarkedText(), launcher.leaveMode() else { return false }
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertLineBreak(_:)):
                 launcher.activate()
             case #selector(NSResponder.cancelOperation(_:)), #selector(NSTextView.complete(_:)):
                 launcher.cancel()
             case #selector(NSResponder.insertTab(_:)):
-                _ = launcher.complete()
+                _ = launcher.tab()
             case #selector(NSResponder.moveRight(_:)):
                 // At the end of the text → takes the completion; else moves the caret.
                 guard let view, view.selectedRange().location == (view.string as NSString).length,
@@ -272,6 +330,9 @@ struct LauncherField: NSViewRepresentable {
             }
             if chars == "\u{7F}" || chars == "\u{8}" {
                 return launcher.removeSelected()
+            }
+            if chars.lowercased() == "a" {
+                return launcher.markAll()
             }
             if let digit = Int(chars), (1...9).contains(digit), digit <= launcher.results.count {
                 launcher.activate(index: digit - 1)

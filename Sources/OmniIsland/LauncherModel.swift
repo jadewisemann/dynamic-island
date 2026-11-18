@@ -22,9 +22,14 @@ struct LauncherItem: Identifiable, Equatable {
         case islandSettings
         /// A web address or search: what to open, and an SF Symbol.
         case web(URL, symbol: String)
-        /// Something copied earlier, kept on the clipboard shelf.
+        /// Something copied earlier, from the clipboard manager.
         case shelf(ShelfItem)
+        /// A built-in app to enter (its id).
+        case plugin(String)
     }
+
+    /// Where a row goes at the top level: answers first, the web last.
+    enum Group: Equatable { case answer, local, web }
 
     let id: String
     let kind: Kind
@@ -33,8 +38,11 @@ struct LauncherItem: Identifiable, Equatable {
     /// Character offsets of `title` the query matched.
     let hits: [Int]
     let score: Int
-    /// Heading drawn above the first row of a group ("최근에 연 앱", "선반").
+    /// Heading drawn above the first row of a group ("최근에 연 앱").
     var section: String? = nil
+    var group: Group = .local
+    /// The plugin that made the row and runs it.
+    var plugin: String = ""
 
     var kindLabel: String {
         switch kind {
@@ -46,20 +54,27 @@ struct LauncherItem: Identifiable, Equatable {
         case .pane: return "시스템 설정"
         case .islandSettings: return "OmniIsland"
         case .web: return "웹"
-        case .shelf: return "선반"
+        case .shelf: return "클립보드"
+        case .plugin: return "내장 앱"
         }
     }
 }
 
 /// Query, results and selection of the launcher (the island's search mode).
+/// The rows come from built-in plugins (LauncherPlugins.swift).
 @MainActor
 final class LauncherModel: ObservableObject {
     @Published private(set) var query = ""
     @Published private(set) var results: [LauncherItem] = []
     @Published var selection = 0
     /// Bumped when the text field should take the query from the model
-    /// (Esc cleared it, Tab completed it).
+    /// (Esc cleared it, Tab completed it, a prefix switched the mode).
     @Published private(set) var querySerial = 0
+    /// The plugin the launcher is inside ("c " → clipboard manager), or nil
+    /// at the top level.
+    @Published private(set) var modeId: String?
+    /// Rows picked for one action, in the order they were picked.
+    @Published private(set) var marked: [LauncherItem] = []
 
     let apps = AppIndex()
     var config = IslandConfig.Launcher()
@@ -74,107 +89,172 @@ final class LauncherModel: ObservableObject {
     var onFocusWindow: ((LauncherWindow) -> Void)?
     var onSummonWindow: ((LauncherWindow) -> Void)?
     var onOpenSettings: (() -> Void)?
-    /// Clipboard shelf, newest first.
+    /// Clipboard history, newest first.
     var shelfProvider: (() -> [ShelfItem])?
-    var shelfCount = 4
-    var onCopyShelf: ((ShelfItem) -> Void)?
-    var onPasteShelf: ((ShelfItem) -> Void)?
+    var onCopyShelf: (([ShelfItem]) -> Void)?
+    var onPasteShelf: (([ShelfItem]) -> Void)?
     var onRemoveShelf: ((ShelfItem) -> Void)?
     var shelfDragProvider: ((ShelfItem) -> NSItemProvider)?
+
+    private(set) var plugins: [LauncherPlugin] = []
+    private var web: WebPlugin?
 
     // Answers that arrive later, each for the query it was asked with.
     private var epoch = 0
     private var asyncWork: DispatchWorkItem?
-    private var files: (query: String, hits: [(FileHit, FuzzyMatch)]) = ("", [])
-    private var suggestions: (query: String, words: [String]) = ("", [])
-    private var suggestionCache: [String: [String]] = [:]
-    private var currencyCache: [CurrencyQuery: CurrencyAnswer] = [:]
-    private var currencyFailed: Set<CurrencyQuery> = []
 
     init() {
+        let web = WebPlugin(host: self)
+        self.web = web
+        // Order matters at the top level: answers in this order, the web last.
+        plugins = [
+            CalculatorPlugin(host: self), CurrencyPlugin(host: self), AppsPlugin(host: self),
+            WindowsPlugin(host: self), SettingsPlugin(host: self), FilesPlugin(host: self),
+            ClipboardPlugin(host: self), web,
+        ]
         apps.onUpdate = { [weak self] in self?.refresh() }
     }
 
-    /// Number of section headings drawn above the rows.
-    var sectionCount: Int {
-        var count = 0
-        var last: String?
-        for item in results where item.section != last {
-            last = item.section
-            if item.section != nil { count += 1 }
-        }
-        return count
+    // MARK: - Plugins and modes
+
+    var mode: LauncherPlugin? { modeId.flatMap(plugin(id:)) }
+
+    func plugin(id: String) -> LauncherPlugin? { plugins.first { $0.id == id } }
+
+    /// The trigger prefix of a plugin, "" when it has none.
+    func prefix(of plugin: LauncherPlugin) -> String {
+        guard plugin.hasMode else { return "" }
+        return (config.prefixes[plugin.id] ?? "").trimmingCharacters(in: .whitespaces).lowercased()
     }
 
-    /// ⌘⌫: drops the selected shelf item.
-    func removeSelected() -> Bool {
-        guard results.indices.contains(selection), case .shelf(let item) = results[selection].kind else { return false }
-        onRemoveShelf?(item)
+    /// Plugins that can be entered with a prefix, in plugin order.
+    var prefixed: [(plugin: LauncherPlugin, prefix: String)] {
+        plugins.compactMap { p -> (plugin: LauncherPlugin, prefix: String)? in
+            let x = prefix(of: p)
+            return x.isEmpty ? nil : (p, x)
+        }
+    }
+
+    /// The same keys typed with the Korean (2-set) layout, so "ㅊ " works
+    /// like "c " without switching input sources.
+    private static let hangulKeys: [Character: Character] = [
+        "q": "ㅂ", "w": "ㅈ", "e": "ㄷ", "r": "ㄱ", "t": "ㅅ", "y": "ㅛ", "u": "ㅕ", "i": "ㅑ", "o": "ㅐ",
+        "p": "ㅔ", "a": "ㅁ", "s": "ㄴ", "d": "ㅇ", "f": "ㄹ", "g": "ㅎ", "h": "ㅗ", "j": "ㅓ", "k": "ㅏ",
+        "l": "ㅣ", "z": "ㅋ", "x": "ㅌ", "c": "ㅊ", "v": "ㅍ", "b": "ㅠ", "n": "ㅜ", "m": "ㅡ",
+    ]
+
+    /// A prefix as typed: itself, and its Korean-layout twin for one letter.
+    static func forms(of prefix: String) -> [String] {
+        guard prefix.count == 1, let c = prefix.first, let twin = hangulKeys[c] else { return [prefix] }
+        return [prefix, String(twin)]
+    }
+
+    /// "c foo" at the top level → the clipboard manager, searching "foo".
+    private func modeTrigger(_ text: String) -> (LauncherPlugin, String)? {
+        guard modeId == nil else { return nil }
+        let lower = text.lowercased()
+        for (plugin, prefix) in prefixed {
+            for form in Self.forms(of: prefix) where lower.hasPrefix(form + " ") {
+                return (plugin, String(text.dropFirst(form.count + 1)))
+            }
+        }
+        return nil
+    }
+
+    func enter(_ plugin: LauncherPlugin, query text: String = "") {
+        guard plugin.hasMode else { return }
+        modeId = plugin.id
+        marked = []
+        query = text
+        selection = 0
+        querySerial &+= 1
+        refresh()
+        scheduleAsync()
+    }
+
+    /// ⌫ on an empty field, or Esc: back to the top level.
+    func leaveMode() -> Bool {
+        guard modeId != nil else { return false }
+        modeId = nil
+        marked = []
+        query = ""
+        selection = 0
+        querySerial &+= 1
         refresh()
         return true
     }
 
-    /// Return copies a shelf item back, ⌘Return pastes it into the app
-    /// that had focus.
-    private static let shelfHint = "Return 복사 · ⌘Return 붙여넣기 · ⌘⌫ 삭제"
-
-    private func shelfRow(_ item: ShelfItem, hits: [Int] = [], score: Int = 0, section: String? = nil) -> LauncherItem {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate(Calendar.current.isDateInToday(item.date) ? "HHmm" : "MMMdHHmm")
-        let source = [item.sourceApp, f.string(from: item.date)].compactMap { $0 }.joined(separator: " · ")
-        return LauncherItem(id: "shelf:" + item.id, kind: .shelf(item), title: item.title,
-                            subtitle: source, hits: hits, score: score, section: section)
-    }
-
-    /// "선반", "shelf" or "clip", optionally followed by words to filter by.
-    private static func shelfQuery(_ q: String) -> String? {
-        let lower = q.lowercased()
-        for word in ["선반", "shelf", "clip", "클립보드"] {
-            if lower == word { return "" }
-            if lower.hasPrefix(word + " ") { return String(q.dropFirst(word.count + 1)).trimmingCharacters(in: .whitespaces) }
-        }
-        return nil
+    /// Placeholder of the search field.
+    var placeholder: String {
+        if let mode { return mode.placeholder }
+        let keys = prefixed.map { $0.prefix }
+        guard !keys.isEmpty else { return "앱, 창, 파일, 설정을 검색하거나 웹에서 찾습니다" }
+        return "검색하거나 \(keys.joined(separator: "·")) 다음에 스페이스로 내장 앱을 엽니다"
     }
 
     // MARK: - Lifecycle
 
     func begin() {
         apps.refreshIfStale()
+        plugins.forEach { $0.reset() }
+        modeId = nil
+        marked = []
         query = ""
         selection = 0
         querySerial &+= 1
-        files = ("", [])
-        suggestions = ("", [])
         refresh()
     }
 
     func setQuery(_ text: String) {
         let cleaned = text.replacingOccurrences(of: "\n", with: " ")
         guard cleaned != query else { return }
+        if let trigger = modeTrigger(cleaned) {
+            enter(trigger.0, query: trigger.1)
+            return
+        }
         query = cleaned
         selection = 0
         refresh()
         scheduleAsync()
     }
 
-    /// Esc: clears the query first, closes on an empty one.
+    /// Esc: drops the picked rows, then the query, then leaves the mode,
+    /// then closes.
     func cancel() {
-        if query.isEmpty {
-            onClose?()
-        } else {
+        if !marked.isEmpty {
+            marked = []
+        } else if !query.isEmpty {
             query = ""
             selection = 0
             querySerial &+= 1
             refresh()
+        } else if !leaveMode() {
+            onClose?()
         }
     }
 
-    /// Tab / →: takes the top result's name (or Google's first completion)
-    /// when it starts with the query.
+    /// Tab: enters a plugin's row, picks a row inside a multi-select mode,
+    /// or completes the query.
+    func tab() -> Bool {
+        if results.indices.contains(selection), case .plugin(let id) = results[selection].kind,
+           let target = plugin(id: id) {
+            enter(target)
+            return true
+        }
+        if allowsMarking {
+            toggleMark(advance: true)
+            return true
+        }
+        return complete()
+    }
+
+    /// →: takes the top result's name (or Google's first completion) when
+    /// it starts with the query.
     func complete() -> Bool {
-        guard !query.isEmpty else { return false }
+        guard !query.isEmpty, modeId == nil else { return false }
         let lower = query.lowercased()
-        let candidates = results.prefix(1).map(\.title) + currentSuggestions.prefix(1)
+        let candidates = results.prefix(1).filter { $0.group != .answer }.map(\.title)
+            + (web?.completions(for: trimmedQuery).prefix(1) ?? [])
         guard let pick = candidates.first(where: { $0.lowercased().hasPrefix(lower) && $0.count > query.count })
         else { return false }
         query = pick
@@ -189,45 +269,81 @@ final class LauncherModel: ObservableObject {
         selection = (selection + delta + results.count) % results.count
     }
 
-    /// Return (or a click): runs a row. `alternate` is ⌘Return.
-    func activate(index: Int? = nil, alternate: Bool = false) {
+    // MARK: - Picking several rows
+
+    var allowsMarking: Bool { mode?.multiSelect == true }
+
+    func isMarked(_ item: LauncherItem) -> Bool { marked.contains { $0.id == item.id } }
+
+    func toggleMark(index: Int? = nil, advance: Bool = false) {
+        guard allowsMarking else { return }
         let i = index ?? selection
         guard results.indices.contains(i) else { return }
         let item = results[i]
-        if case .currency(nil) = item.kind { return }
-        onClose?()
-        switch item.kind {
-        case .app(let app):
-            if alternate {
-                onRevealApp?(app)
-            } else {
-                apps.recordLaunch(app)
-                onOpenApp?(app)
-            }
-        case .window(let window):
-            if alternate { onSummonWindow?(window) } else { onFocusWindow?(window) }
-        case .calculation(let value):
-            copy(Calculator.plain(value))
-        case .currency(let answer):
-            if let answer { copy(Calculator.plain((answer.value * 100).rounded() / 100)) }
-        case .file(let file):
-            let url = URL(fileURLWithPath: file.path)
-            if alternate { NSWorkspace.shared.activateFileViewerSelecting([url]) } else { NSWorkspace.shared.open(url) }
-        case .pane(let pane):
-            if let url = pane.url { NSWorkspace.shared.open(url) }
-        case .islandSettings:
-            onOpenSettings?()
-        case .web(let url, _):
-            NSWorkspace.shared.open(url)
-        case .shelf(let shelfItem):
-            if alternate { onPasteShelf?(shelfItem) } else { onCopyShelf?(shelfItem) }
+        if let k = marked.firstIndex(where: { $0.id == item.id }) {
+            marked.remove(at: k)
+        } else {
+            marked.append(item)
         }
+        if advance && i + 1 < results.count { selection = i + 1 }
     }
 
-    private func copy(_ text: String) {
-        let board = NSPasteboard.general
-        board.clearContents()
-        board.setString(text, forType: .string)
+    /// ⇧↑ ⇧↓: picks the selected row and the next one.
+    func extend(_ delta: Int) -> Bool {
+        guard allowsMarking, results.indices.contains(selection) else { return false }
+        mark(selection)
+        let next = selection + delta
+        guard results.indices.contains(next) else { return true }
+        selection = next
+        mark(next)
+        return true
+    }
+
+    /// ⌘A on an empty query: picks every row.
+    func markAll() -> Bool {
+        guard allowsMarking, query.isEmpty, !results.isEmpty else { return false }
+        marked = results
+        return true
+    }
+
+    private func mark(_ index: Int) {
+        if !isMarked(results[index]) { marked.append(results[index]) }
+    }
+
+    // MARK: - Running rows
+
+    /// Return (or a click): runs a row, or the picked rows. `alternate` is ⌘Return.
+    func activate(index: Int? = nil, alternate: Bool = false) {
+        let items: [LauncherItem]
+        if index == nil && !marked.isEmpty {
+            items = marked
+        } else {
+            let i = index ?? selection
+            guard results.indices.contains(i) else { return }
+            items = [results[i]]
+        }
+        guard let first = items.first else { return }
+        if case .plugin(let id) = first.kind {
+            if let target = plugin(id: id) { enter(target) }
+            return
+        }
+        guard let target = plugin(id: first.plugin), target.canActivate(first) else { return }
+        onClose?()
+        target.activate(items, alternate: alternate)
+    }
+
+    /// ⌘⌫: removes the selected row where its plugin allows it.
+    func removeSelected() -> Bool {
+        guard results.indices.contains(selection) else { return false }
+        let item = results[selection]
+        guard let target = plugin(id: item.plugin), target.remove(item) else { return false }
+        marked.removeAll { $0.id == item.id }
+        refresh()
+        return true
+    }
+
+    func dragProvider(_ item: LauncherItem) -> NSItemProvider? {
+        plugin(id: item.plugin)?.dragProvider(item)
     }
 
     // MARK: - Answers that arrive later
@@ -249,55 +365,20 @@ final class LauncherModel: ObservableObject {
 
     private func ask(_ q: String, epoch asked: Int) {
         guard asked == epoch else { return }
-        if config.searchFiles {
-            let limit = max(1, Int(config.maxFiles))
-            DispatchQueue.global(qos: .userInitiated).async {
-                let found = FileSearch.find(q, limit: limit)
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated { [weak self] in
-                        guard let self, asked == self.epoch else { return }
-                        self.files = (q, found)
-                        self.refresh()
-                    }
-                }
-            }
+        let inMode = mode != nil
+        let targets = mode.map { [$0] } ?? plugins.filter { $0.inRoot }
+        for plugin in targets {
+            plugin.fetch(q, inMode: inMode,
+                         isCurrent: { [weak self] in self?.epoch == asked },
+                         done: { [weak self] in self?.refresh() })
         }
-        if config.webSearch && config.suggestions && WebSearch.eligible(q) {
-            if let cached = suggestionCache[q.lowercased()] {
-                suggestions = (q, cached)
-                refresh()
-            } else {
-                WebSearch.suggestions(for: q) { [weak self] words in
-                    guard let self, let words else { return }
-                    self.suggestionCache[q.lowercased()] = words
-                    guard asked == self.epoch else { return }
-                    self.suggestions = (q, words)
-                    self.refresh()
-                }
-            }
-        }
-        if config.currency, let cq = Currency.parse(q), currencyCache[cq] == nil, !currencyFailed.contains(cq) {
-            Currency.fetch(cq) { [weak self] answer in
-                guard let self else { return }
-                if let answer { self.currencyCache[cq] = answer } else { self.currencyFailed.insert(cq) }
-                self.refresh()
-            }
-        }
-    }
-
-    /// Completions for the query, or the ones for fewer letters that still
-    /// begin with it, so the rows don't blink at every key.
-    private var currentSuggestions: [String] {
-        let q = trimmedQuery.lowercased()
-        guard !q.isEmpty, !suggestions.words.isEmpty, q.hasPrefix(suggestions.query.lowercased()) else { return [] }
-        return suggestions.words.filter { $0.lowercased().hasPrefix(q) && $0.lowercased() != q }
     }
 
     // MARK: - Searching
 
-    private func refresh() {
+    func refresh() {
         let selectedId = results.indices.contains(selection) ? results[selection].id : nil
-        results = search(query)
+        results = search(trimmedQuery)
         if let selectedId, selection != 0, let kept = results.firstIndex(where: { $0.id == selectedId }) {
             selection = kept
         } else if selection >= results.count {
@@ -306,169 +387,75 @@ final class LauncherModel: ObservableObject {
         onLayoutChange?()
     }
 
-    private func search(_ text: String) -> [LauncherItem] {
+    private func search(_ q: String) -> [LauncherItem] {
+        if let mode { return Array(mode.search(q, inMode: true).prefix(300)) }
+
+        let roots = plugins.filter { $0.inRoot }
         let limit = max(3, Int(config.maxResults))
-        let q = text.trimmingCharacters(in: .whitespaces)
-        let shelf = shelfProvider?() ?? []
         if q.isEmpty {
-            var list: [LauncherItem] = []
-            if config.showRecent {
-                list = apps.recentApps(limit: min(Int(config.recentCount), limit)).map { app in
-                    LauncherItem(id: "app:" + app.path, kind: .app(app), title: app.displayName,
-                                 subtitle: nil, hits: [], score: 0, section: "최근에 연 앱")
-                }
-            }
-            list += shelf.prefix(max(0, shelfCount)).map { shelfRow($0, section: "선반 · " + Self.shelfHint) }
-            return list
+            return Array(roots.flatMap { $0.search("", inMode: false) }.prefix(limit))
         }
 
-        // "선반 …" lists only the shelf.
-        if let filter = Self.shelfQuery(q) {
-            let matching = filter.isEmpty ? shelf : shelf.filter { $0.searchText.localizedCaseInsensitiveContains(filter) }
-            return matching.prefix(max(limit, 12)).map { shelfRow($0, section: "선반 · " + Self.shelfHint) }
-        }
-
-        // Answers on top.
         var answers: [LauncherItem] = []
-        if config.calculator, let value = Calculator.evaluate(q) {
-            answers.append(LauncherItem(id: "calc", kind: .calculation(value), title: "= " + Calculator.format(value),
-                                        subtitle: "Return을 누르면 결과를 복사합니다", hits: [], score: 0))
-        }
-        if config.currency, let cq = Currency.parse(q) {
-            let title = "\(Calculator.format(cq.amount)) \(cq.from) → \(cq.to)"
-            if let answer = currencyCache[cq] {
-                answers.append(LauncherItem(
-                    id: "currency", kind: .currency(answer),
-                    title: "\(Calculator.format((answer.value * 100).rounded() / 100)) \(cq.to)",
-                    subtitle: "\(title) · ECB \(answer.date) 기준 · Return을 누르면 복사합니다", hits: [], score: 0))
-            } else {
-                let failed = currencyFailed.contains(cq)
-                answers.append(LauncherItem(id: "currency", kind: .currency(nil), title: title,
-                                            subtitle: failed ? "환율을 가져오지 못했습니다" : "환율을 가져오는 중입니다…",
-                                            hits: [], score: 0))
-            }
-        }
-
-        // Local results, ranked together.
         var items: [LauncherItem] = []
-        if config.searchApps {
-            for app in apps.apps {
-                guard let names = apps.candidates[app.path] else { continue }
-                var best: FuzzyMatch?
-                var bestIsDisplay = true
-                for (n, name) in names.enumerated() {
-                    if let m = FuzzyMatcher.match(q, name), m.score > (best?.score ?? -1) {
-                        best = m
-                        bestIsDisplay = n == 0
-                    }
-                }
-                guard let best else { continue }
-                let boost = min(apps.launchCount(app), 20) * 8
-                let subtitle = app.fileName != app.displayName ? app.fileName : nil
-                items.append(LauncherItem(id: "app:" + app.path, kind: .app(app), title: app.displayName,
-                                          subtitle: subtitle, hits: bestIsDisplay ? best.hits : [],
-                                          score: best.score + boost))
-            }
-        }
-
-        if config.searchWindows, let windows = windowsProvider?() {
-            for window in windows {
-                let appMatch = FuzzyMatcher.match(q, FuzzyMatcher.Candidate(window.appName))
-                let titleMatch = window.title.isEmpty ? nil : FuzzyMatcher.match(q, FuzzyMatcher.Candidate(window.title))
-                let score = max(appMatch?.score ?? -1, titleMatch?.score ?? -1)
-                guard score >= 0 else { continue }
-                let title = window.title.isEmpty ? window.appName : window.title
-                let hits = window.title.isEmpty ? (appMatch?.hits ?? []) : (titleMatch?.hits ?? [])
-                items.append(LauncherItem(
-                    id: "window:" + window.id, kind: .window(window), title: title,
-                    subtitle: "\(window.appName) · 워크스페이스 \(window.workspaceLabel)",
-                    hits: hits, score: score - 40))
-            }
-        }
-
-        if config.searchSettings {
-            for (pane, match) in SettingsPanes.search(q) {
-                items.append(LauncherItem(id: "pane:" + pane.id, kind: .pane(pane), title: pane.displayName,
-                                          subtitle: "시스템 설정", hits: match.hits, score: match.score - 60))
-            }
-            let own = ["settings", "설정", "omniisland", "preferences", "환경설정"]
-                .compactMap { FuzzyMatcher.match(q, FuzzyMatcher.Candidate($0)) }
-                .filter { $0.score >= 600 }
-                .map(\.score).max()
-            if let own {
-                items.append(LauncherItem(id: "island-settings", kind: .islandSettings, title: "OmniIsland 설정",
-                                          subtitle: "아일랜드의 모양, 위젯, 런처를 바꿉니다", hits: [], score: own - 80))
-            }
-        }
-
-        if config.searchFiles, !files.hits.isEmpty, q.lowercased().hasPrefix(files.query.lowercased()) {
-            for (file, _) in files.hits {
-                // Re-rank against what is typed now; drop what no longer matches.
-                // Spotlight's own matches (diacritics, inside words) stay for the query they answered.
-                var match = FuzzyMatcher.match(q, FuzzyMatcher.Candidate(file.name))
-                if match == nil && q == files.query { match = FuzzyMatch(score: 100, hits: []) }
-                guard let match else { continue }
-                let folder = (file.path as NSString).deletingLastPathComponent
-                    .replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
-                items.append(LauncherItem(id: "file:" + file.path, kind: .file(file), title: file.name,
-                                          subtitle: folder, hits: match.hits, score: match.score - 120))
-            }
-        }
-
-        if q.count >= 2 {
-            for item in shelf {
-                if let m = FuzzyMatcher.match(q, FuzzyMatcher.Candidate(item.title)), m.score >= 400 {
-                    items.append(shelfRow(item, hits: m.hits, score: m.score - 150))
-                } else if item.searchText.localizedCaseInsensitiveContains(q) {
-                    items.append(shelfRow(item, score: 60))
+        var web: [LauncherItem] = []
+        for plugin in roots {
+            for item in plugin.search(q, inMode: false) {
+                switch item.group {
+                case .answer: answers.append(item)
+                case .local: items.append(item)
+                case .web: web.append(item)
                 }
             }
         }
-
+        let entries = pluginRows(q)
+        items += entries.matched
         items.sort { a, b in
             a.score != b.score ? a.score > b.score
                 : a.title.localizedStandardCompare(b.title) == .orderedAscending
         }
-
-        // The web last: an address, a search for exactly what is typed, then
-        // Google's completions and the other engines.
-        var web: [LauncherItem] = []
-        if let address = WebSearch.address(q) {
-            web.append(LauncherItem(id: "address", kind: .web(address, symbol: "safari"),
-                                    title: address.absoluteString, subtitle: "브라우저에서 열기", hits: [], score: 0))
-        }
-        if config.webSearch, let url = WebSearch.googleURL(q) {
-            web.append(LauncherItem(id: "google", kind: .web(url, symbol: "magnifyingglass"),
-                                    title: q, subtitle: "Google에서 검색", hits: [], score: 0))
-            if config.suggestions {
-                for word in currentSuggestions.prefix(max(0, Int(config.maxSuggestions))) {
-                    guard let url = WebSearch.googleURL(word) else { continue }
-                    web.append(LauncherItem(id: "suggest:" + word, kind: .web(url, symbol: "magnifyingglass"),
-                                            title: word, subtitle: "Google 추천 검색어",
-                                            hits: Array(min(q.count, word.count)..<word.count), score: 0))
-                }
-            }
-        }
-        if config.askClaude, let url = WebSearch.url("https://claude.ai/new", "q", q) {
-            web.append(LauncherItem(id: "claude", kind: .web(url, symbol: "sparkles"),
-                                    title: q, subtitle: "Claude에게 묻기", hits: [], score: 0))
-        }
-        if config.askGrok, let url = WebSearch.url("https://grok.com/", "q", q) {
-            web.append(LauncherItem(id: "grok", kind: .web(url, symbol: "bubble.left.and.text.bubble.right"),
-                                    title: q, subtitle: "Grok에게 묻기", hits: [], score: 0))
-        }
-        if config.searchX, let url = WebSearch.url("https://x.com/search", "q", q) {
-            web.append(LauncherItem(id: "x", kind: .web(url, symbol: "number"),
-                                    title: q, subtitle: "X에서 검색", hits: [], score: 0))
-        }
+        // Typing exactly a prefix ("c") puts the plugin right under the top
+        // match, so Return still opens what was being looked for.
+        for entry in entries.exact.reversed() { items.insert(entry, at: min(1, items.count)) }
 
         // Answers and local rows first; the web keeps at least its first row
         // (a search for what is typed) so Return always does something.
         let reservedForWeb = min(web.count, max(1, limit - answers.count - items.count))
         let localRoom = max(0, limit - answers.count - reservedForWeb)
         var list = answers + items.prefix(localRoom)
-        list += web.prefix(limit - list.count)
+        list += web.prefix(max(0, limit - list.count))
         return list
+    }
+
+    /// Rows that enter a plugin: for its prefix typed alone, or its name.
+    private func pluginRows(_ q: String) -> (exact: [LauncherItem], matched: [LauncherItem]) {
+        var exact: [LauncherItem] = []
+        var matched: [LauncherItem] = []
+        let lower = q.lowercased()
+        for plugin in plugins where plugin.hasMode {
+            let trigger = prefix(of: plugin)
+            let subtitle = trigger.isEmpty ? "Return을 누르면 이 내장 앱으로 들어갑니다"
+                : "\(trigger) 다음에 스페이스를 눌러도 바로 들어갑니다"
+            func entry(score: Int, hits: [Int] = []) -> LauncherItem {
+                LauncherItem(id: "plugin:" + plugin.id, kind: .plugin(plugin.id), title: plugin.name,
+                             subtitle: subtitle, hits: hits, score: score, plugin: plugin.id)
+            }
+            if !trigger.isEmpty && Self.forms(of: trigger).contains(lower) {
+                exact.append(entry(score: 0))
+                continue
+            }
+            guard q.count >= 2 else { continue }
+            let names = [plugin.name] + plugin.keywords
+            var best: (Int, FuzzyMatch)?
+            for (n, name) in names.enumerated() {
+                guard let m = FuzzyMatcher.match(q, FuzzyMatcher.Candidate(name)), m.score >= 700 else { continue }
+                if m.score > (best?.1.score ?? -1) { best = (n, m) }
+            }
+            if let best {
+                matched.append(entry(score: best.1.score - 50, hits: best.0 == 0 ? best.1.hits : []))
+            }
+        }
+        return (exact, matched)
     }
 
     // MARK: - Layout
@@ -479,21 +466,38 @@ final class LauncherModel: ObservableObject {
     static let messageHeight: CGFloat = 34
     static let verticalPadding: CGFloat = 14
 
+    /// Number of section headings drawn above the rows.
+    var sectionCount: Int {
+        var count = 0
+        var last: String?
+        for item in results where item.section != last {
+            last = item.section
+            if item.section != nil { count += 1 }
+        }
+        return count
+    }
+
+    /// Rows shown before the list scrolls.
+    var visibleRows: Int { max(3, Int(config.maxResults)) }
+
+    private var maximumListHeight: CGFloat {
+        CGFloat(visibleRows) * Self.rowHeight + 2 * Self.headerHeight
+    }
+
     /// Height of the launcher part below the workspace row.
     var bodyHeight: CGFloat {
         var height = Self.fieldHeight + Self.verticalPadding
-        height += CGFloat(sectionCount) * Self.headerHeight
         if results.isEmpty && !query.isEmpty {
             height += Self.messageHeight
         } else {
-            height += CGFloat(results.count) * Self.rowHeight
+            let list = CGFloat(sectionCount) * Self.headerHeight + CGFloat(results.count) * Self.rowHeight
+            height += min(list, maximumListHeight)
         }
         return height
     }
 
     /// Tallest the launcher can get, for sizing the panel.
     var maximumBodyHeight: CGFloat {
-        Self.fieldHeight + Self.verticalPadding + 2 * Self.headerHeight
-            + CGFloat(max(max(3, Int(config.maxResults)), Int(config.recentCount) + shelfCount, 12)) * Self.rowHeight
+        Self.fieldHeight + Self.verticalPadding + maximumListHeight
     }
 }
