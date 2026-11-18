@@ -770,8 +770,9 @@ private struct WidgetSettings: View {
                     Text("3칸").tag(3.0)
                 }
                 .pickerStyle(.segmented)
-                slotPickers("왼쪽", side: \.leftPanel)
-                slotPickers("오른쪽", side: \.rightPanel)
+                PanelSlotEditor(model: model)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
             } header: {
                 Text("좌우 위젯 칸")
             } footer: {
@@ -827,38 +828,6 @@ private struct WidgetSettings: View {
         .formStyle(.grouped)
     }
 
-    private var panelSlots: Int { min(max(Int(model.draft.widgets.panelUnits.rounded()), 1), 3) }
-
-    @ViewBuilder
-    private func slotPickers(_ title: String, side: WritableKeyPath<IslandConfig.Widgets, [String]>) -> some View {
-        let count = max(panelSlots, model.draft.widgets[keyPath: side].count)
-        ForEach(0..<count, id: \.self) { index in
-            Picker(count == 1 ? title : "\(title) \(index + 1)", selection: slotBinding(side, index)) {
-                Text("없음").tag("")
-                Text("시계").tag("clock")
-                Text("달력").tag("calendar")
-                Text("다음 일정").tag("nextEvent")
-                Text("오늘 일정").tag("events")
-                Text("최근 알림").tag("notifications")
-            }
-        }
-    }
-
-    private func slotBinding(_ side: WritableKeyPath<IslandConfig.Widgets, [String]>, _ index: Int) -> Binding<String> {
-        Binding(
-            get: {
-                let items = model.draft.widgets[keyPath: side]
-                return index < items.count ? items[index] : ""
-            },
-            set: { value in
-                var items = model.draft.widgets[keyPath: side]
-                while items.count <= index { items.append("") }
-                items[index] = value
-                model.draft.widgets[keyPath: side] = items.filter { !$0.isEmpty }
-            }
-        )
-    }
-
     private var usesClock: Bool {
         let w = model.draft.widgets
         return w.leftWing.lowercased() == "clock" || w.rightWing.lowercased() == "clock"
@@ -876,6 +845,122 @@ private struct WidgetSettings: View {
             Text("놓친 알림 수").tag("notifications")
             Text("없음").tag("none")
         }
+    }
+}
+
+// MARK: - Widget slot editor
+
+/// The widgets that can go into a side panel slot.
+enum PanelWidgetKind: String, CaseIterable, Identifiable {
+    case clock, calendar, nextEvent, events, notifications
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .clock: return "시계"
+        case .calendar: return "달력"
+        case .nextEvent: return "다음 일정"
+        case .events: return "오늘 일정"
+        case .notifications: return "최근 알림"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .clock: return "clock"
+        case .calendar: return "calendar"
+        case .nextEvent: return "calendar.badge.clock"
+        case .events: return "list.bullet.rectangle"
+        case .notifications: return "bell.badge"
+        }
+    }
+
+    static func named(_ name: String) -> PanelWidgetKind? {
+        allCases.first { $0.rawValue.lowercased() == name.lowercased() }
+    }
+}
+
+/// A sketch of the island: slots on the left, the workspace row, slots on
+/// the right. Click a slot to choose its widget.
+private struct PanelSlotEditor: View {
+    @ObservedObject var model: SettingsModel
+
+    private var slots: Int { min(max(Int(model.draft.widgets.panelUnits.rounded()), 1), 3) }
+
+    var body: some View {
+        let w = model.draft.widgets
+        let count = max(slots, w.leftPanel.count, w.rightPanel.count)
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                side(\.leftPanel, count: count)
+                Text("워크스페이스 줄")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 130, height: 58)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                side(\.rightPanel, count: count)
+            }
+            Text("칸을 눌러 넣을 위젯을 고릅니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func side(_ key: WritableKeyPath<IslandConfig.Widgets, [String]>, count: Int) -> some View {
+        HStack(spacing: 4) {
+            ForEach(0..<count, id: \.self) { index in
+                slot(key, index)
+            }
+        }
+    }
+
+    private func slot(_ key: WritableKeyPath<IslandConfig.Widgets, [String]>, _ index: Int) -> some View {
+        let items = model.draft.widgets[keyPath: key]
+        let current = index < items.count ? PanelWidgetKind.named(items[index]) : nil
+        return Menu {
+            ForEach(PanelWidgetKind.allCases) { kind in
+                Button {
+                    set(key, index, kind.rawValue)
+                } label: {
+                    Label(kind.title, systemImage: kind.symbol)
+                }
+            }
+            if current != nil {
+                Divider()
+                Button("비우기", role: .destructive) { set(key, index, "") }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: current?.symbol ?? "plus")
+                    .font(.system(size: 16, weight: .medium))
+                Text(current?.title ?? "비어 있음")
+                    .font(.system(size: 10))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(current == nil ? Color.secondary : Color.primary)
+            .frame(width: 58, height: 58)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(current == nil ? Color.clear : Color.accentColor.opacity(0.14))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(current == nil ? Color.secondary.opacity(0.4) : Color.accentColor,
+                                  style: StrokeStyle(lineWidth: 1, dash: current == nil ? [4, 3] : []))
+            )
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func set(_ key: WritableKeyPath<IslandConfig.Widgets, [String]>, _ index: Int, _ value: String) {
+        var items = model.draft.widgets[keyPath: key]
+        while items.count <= index { items.append("") }
+        items[index] = value
+        model.draft.widgets[keyPath: key] = items.filter { !$0.isEmpty }
     }
 }
 
