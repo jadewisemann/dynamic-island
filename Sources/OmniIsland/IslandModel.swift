@@ -60,6 +60,13 @@ final class IslandModel: ObservableObject {
     var isPreview = false
 
     private(set) var modifierHeld = false
+    /// The mouse is over the island; keeps it open after the modifier is
+    /// released so its icons can be clicked.
+    private(set) var pointerInside = false
+    /// Clicked an app icon in the workspace row.
+    var onActivateApp: ((WorkspaceApp, WorkspaceItem) -> Void)?
+    /// Clicked a workspace label or pill.
+    var onFocusWorkspace: ((WorkspaceItem) -> Void)?
     private var showWork: DispatchWorkItem?
     private var hideWork: DispatchWorkItem?
     private var collapseWork: DispatchWorkItem?
@@ -95,8 +102,10 @@ final class IslandModel: ObservableObject {
 
     /// Fills the model with sample workspaces for the settings preview.
     func loadSample() {
-        func app(_ name: String, _ bundle: String, windows: Int = 1, focused: Bool = false) -> WorkspaceApp {
-            WorkspaceApp(id: bundle.lowercased(), name: name, bundleId: bundle, windowCount: windows, isFocused: focused)
+        func app(_ name: String, _ bundle: String, windows: Int = 1, focused: Bool = false,
+                 floating: Bool = false) -> WorkspaceApp {
+            WorkspaceApp(id: bundle.lowercased(), name: name, bundleId: bundle, windowCount: windows,
+                         isFocused: focused, isFloating: floating)
         }
         func ws(_ n: Int, _ name: String, _ apps: [WorkspaceApp]) -> WorkspaceItem {
             WorkspaceItem(id: "sample-\(n)", label: name, number: n, displayId: nil, displayName: nil,
@@ -107,7 +116,7 @@ final class IslandModel: ObservableObject {
             ws(1, "web", [app("Finder", "com.apple.finder", focused: true), app("Safari", "com.apple.Safari", windows: 2)]),
             ws(2, "chat", [app("Messages", "com.apple.MobileSMS")]),
             ws(3, "dev", [app("Terminal", "com.apple.Terminal")]),
-            ws(4, "mail", [app("Mail", "com.apple.mail"), app("System Settings", "com.apple.systempreferences")]),
+            ws(4, "mail", [app("Mail", "com.apple.mail"), app("System Settings", "com.apple.systempreferences", floating: true)]),
         ]
         activeWorkspaceKey = "sample-1"
         activeWorkspaceLabel = "web"
@@ -180,12 +189,51 @@ final class IslandModel: ObservableObject {
                 self.scheduleDashboard()
             }
         } else {
-            hideWork = after(ms: config.trigger.hideDelayMs) { [weak self] in
-                guard let self, !self.modifierHeld, self.phase.isModifierPhase else { return }
-                self.setPhase(.hidden)
-                self.showNextNotification()
-            }
+            scheduleHide()
         }
+    }
+
+    private func scheduleHide() {
+        hideWork?.cancel()
+        hideWork = after(ms: config.trigger.hideDelayMs) { [weak self] in
+            guard let self, !self.modifierHeld, !self.pointerInside, self.phase.isModifierPhase else { return }
+            self.setPhase(.hidden)
+            self.showNextNotification()
+        }
+    }
+
+    /// Whether the island takes clicks right now.
+    var acceptsClicks: Bool { phase.isModifierPhase && !isPreview }
+
+    func setPointerInside(_ inside: Bool) {
+        guard inside != pointerInside else { return }
+        pointerInside = inside
+        if !inside && !modifierHeld && phase.isModifierPhase {
+            scheduleHide()
+        }
+    }
+
+    // MARK: - Clicks
+
+    func activate(_ app: WorkspaceApp, in ws: WorkspaceItem) {
+        guard acceptsClicks else { return }
+        onActivateApp?(app, ws)
+        closeAfterClick()
+    }
+
+    func focus(_ ws: WorkspaceItem) {
+        guard acceptsClicks else { return }
+        onFocusWorkspace?(ws)
+        closeAfterClick()
+    }
+
+    private func closeAfterClick() {
+        showWork?.cancel()
+        hideWork?.cancel()
+        dashboardWork?.cancel()
+        pointerInside = false
+        setPhase(.hidden)
+        showNextNotification()
     }
 
     func present(_ event: IslandEvent) {
@@ -614,6 +662,7 @@ final class IslandModel: ObservableObject {
 
     static let appIconGap: CGFloat = 4
     static let groupPadding: CGFloat = 8
+    static let floatingSeparatorWidth: CGFloat = 1.5
 
     /// Width of one workspace group in the "apps" style:
     /// [pad] label [gap] icon icon … (+N) [pad]
@@ -625,6 +674,10 @@ final class IslandModel: ObservableObject {
         var width = Self.groupPadding * 2 + labelWidth
         if shown > 0 {
             width += CGFloat(shown) * (CGFloat(a.appIconSize) + Self.appIconGap)
+            let visible = apps.prefix(shown)
+            if visible.contains(where: \.isFloating) && visible.contains(where: { !$0.isFloating }) {
+                width += Self.floatingSeparatorWidth + Self.appIconGap
+            }
         }
         if apps.count > shown {
             width += pillWidth(for: "+\(apps.count - shown)") - 4

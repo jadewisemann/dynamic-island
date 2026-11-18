@@ -194,6 +194,41 @@ final class OmniWMClient {
         Log.info("omniwmctl: \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
 
+    // MARK: - One-shot commands
+
+    /// Runs `omniwmctl <arguments>` once, off the main thread, and reports
+    /// whether it exited with status 0.
+    static func run(_ arguments: [String], executablePath: String?, socketPath: String?,
+                    completion: @escaping @MainActor (Bool) -> Void) {
+        guard let exe = resolveExecutable(configured: executablePath) else {
+            completion(false)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: exe)
+            p.arguments = arguments
+            var env = ProcessInfo.processInfo.environment
+            if let socketPath { env["OMNIWM_SOCKET"] = socketPath }
+            p.environment = env
+            p.standardInput = FileHandle.nullDevice
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            var ok = false
+            do {
+                try p.run()
+                p.waitUntilExit()
+                ok = p.terminationStatus == 0
+            } catch {
+                ok = false
+            }
+            Log.info("omniwmctl \(arguments.joined(separator: " ")) → \(ok ? "ok" : "failed")")
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { completion(ok) }
+            }
+        }
+    }
+
     // MARK: - Locating omniwmctl
 
     static func resolveExecutable(configured: String?) -> String? {

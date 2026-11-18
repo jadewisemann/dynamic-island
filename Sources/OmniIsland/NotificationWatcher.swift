@@ -68,10 +68,15 @@ enum NotificationBannerReader {
         var panelOpen = false
         let screenHeight = NSScreen.screens.map(\.frame.height).max() ?? 900
         for window in windows {
-            if let size = size(of: window), size.height > screenHeight * 0.6 {
+            var found: [BannerItem] = []
+            collectItems(in: window, depth: 0, into: &found)
+            // Recent macOS versions draw banners inside a screen-tall,
+            // transparent window, so height alone does not mean the history
+            // panel is open: it also has to hold more than a banner stack.
+            if let size = size(of: window), size.height > screenHeight * 0.6, found.count > 3 {
                 panelOpen = true
             }
-            collectItems(in: window, depth: 0, into: &items)
+            items += found
         }
         return Snapshot(items: items, panelOpen: panelOpen, windowCount: windows.count)
     }
@@ -375,11 +380,17 @@ final class NotificationWatcher {
     /// For the next `seconds`, every scan appends the Notification Center tree
     /// to `logURL`. Returns the log location.
     @discardableResult
-    func recordDiagnostics(seconds: TimeInterval = 60) -> URL {
+    func recordDiagnostics(seconds: TimeInterval = 60, context: [String] = []) -> URL {
         diagnosticsUntil = Date().addingTimeInterval(seconds)
         if !isRunning { start() }
-        let header = "=== OmniIsland notification diagnostics \(Date()) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString) ===\n"
-        appendLog(header)
+        var lines = [
+            "=== OmniIsland notification diagnostics \(Date()) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString) ===",
+            "accessibility: \(ModifierMonitor.isTrusted(prompt: false))",
+            "notification center pid: \(NotificationBannerReader.process().map { String($0.processIdentifier) } ?? "not running")",
+            "observer attached: \(observer != nil) (pid \(observedPid))",
+        ]
+        lines += context
+        appendLog(lines.joined(separator: "\n") + "\n")
         scheduleScan(after: 0)
         return Self.logURL
     }
@@ -468,7 +479,11 @@ final class NotificationWatcher {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.scanning = false
-                    if let dump { self.appendLog("--- scan \(Date())\n" + dump) }
+                    if let dump {
+                        let parsed = snapshot.items.map { "  item [\($0.subrole ?? "-")] " + $0.texts.joined(separator: " | ") }
+                        self.appendLog("--- scan \(Date()) windows=\(snapshot.windowCount) items=\(snapshot.items.count) panelOpen=\(snapshot.panelOpen)\n"
+                                       + parsed.map { $0 + "\n" }.joined() + dump)
+                    }
                     self.handle(snapshot)
                     if self.scanScheduled {
                         self.scanScheduled = false
@@ -492,6 +507,9 @@ final class NotificationWatcher {
         guard primed else {
             primed = true
             return
+        }
+        if !fresh.isEmpty {
+            Log.info("notification banners: \(fresh.count) new of \(snapshot.items.count), windows \(snapshot.windowCount), panelOpen \(snapshot.panelOpen)")
         }
         guard !snapshot.panelOpen, fresh.count <= 3 else { return }
 

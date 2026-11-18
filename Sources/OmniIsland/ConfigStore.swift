@@ -114,7 +114,29 @@ final class ConfigStore {
 }
 
 enum Log {
+    /// ~/Library/Logs/OmniIsland/omni-island.log, kept under about 1 MB.
+    static let fileURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/OmniIsland/omni-island.log")
+    private static let queue = DispatchQueue(label: "omni-island.log", qos: .utility)
+
     static func info(_ message: String) {
         FileHandle.standardError.write(Data("[OmniIsland] \(message)\n".utf8))
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+        queue.async {
+            let fm = FileManager.default
+            let url = fileURL
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 1_000_000 {
+                try? fm.removeItem(at: url)
+            }
+            guard let data = line.data(using: .utf8) else { return }
+            if let handle = try? FileHandle(forWritingTo: url) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                try? handle.close()
+            } else {
+                try? data.write(to: url)
+            }
+        }
     }
 }
