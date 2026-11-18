@@ -451,38 +451,39 @@ private struct ActiveHighlight: View {
                 shape.fill(inactiveFill)
             }
             if isActive {
-                switch model.activeStyle {
-                case .fill:
-                    shape
-                        .fill(accent.opacity(model.usesAppStyle ? 0.32 : 1))
-                        .shadow(color: glow, radius: 6, x: 0, y: 0)
-                        .matchedGeometryEffect(id: "active-workspace", in: ns)
-                case .outline:
-                    shape
-                        .stroke(accent, lineWidth: 1.5)
-                        .shadow(color: glow, radius: 6, x: 0, y: 0)
-                        .matchedGeometryEffect(id: "active-workspace", in: ns)
-                case .underline:
-                    Capsule()
-                        .fill(accent)
-                        .frame(height: 2)
-                        .padding(.horizontal, 6)
-                        .shadow(color: glow, radius: 4, x: 0, y: 0)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .matchedGeometryEffect(id: "active-workspace", in: ns)
-                case .dot:
-                    Circle()
-                        .fill(accent)
-                        .frame(width: 4, height: 4)
-                        .shadow(color: glow, radius: 4, x: 0, y: 0)
-                        .offset(y: 4)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .matchedGeometryEffect(id: "active-workspace", in: ns)
-                }
+                marker(accent: accent, glow: glow)
+                    .matchedGeometryEffect(id: "active-workspace", in: ns)
             }
             if isTarget && !isActive {
                 shape.stroke(accent, lineWidth: 1.5)
             }
+        }
+    }
+
+    @ViewBuilder private func marker(accent: Color, glow: Color) -> some View {
+        switch model.activeStyle {
+        case .fill:
+            shape
+                .fill(accent.opacity(model.usesAppStyle ? 0.32 : 1))
+                .shadow(color: glow, radius: 6, x: 0, y: 0)
+        case .outline:
+            shape
+                .stroke(accent, lineWidth: 1.5)
+                .shadow(color: glow, radius: 6, x: 0, y: 0)
+        case .underline:
+            Capsule()
+                .fill(accent)
+                .frame(height: 2)
+                .padding(.horizontal, 6)
+                .shadow(color: glow, radius: 4, x: 0, y: 0)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+        case .dot:
+            Circle()
+                .fill(accent)
+                .frame(width: 4, height: 4)
+                .shadow(color: glow, radius: 4, x: 0, y: 0)
+                .offset(y: 4)
+                .frame(maxHeight: .infinity, alignment: .bottom)
         }
     }
 }
@@ -530,53 +531,72 @@ private struct WorkspaceGroup: View {
         let isEmpty = ws.apps.isEmpty && ws.windowCount == 0
 
         HStack(spacing: IslandModel.appIconGap) {
-            Text(model.label(for: ws))
-                .font(model.numberFont(size: CGFloat(a.fontSize) * 1.05, weight: isActive ? .heavy : .semibold))
-                .foregroundStyle(model.palette.text.opacity(isActive ? 1 : (isEmpty ? 0.35 : 0.6)))
-                .lineLimit(1)
-                .fixedSize()
-                .padding(.trailing, shown.isEmpty ? 0 : 2)
+            labelText(isActive: isActive, isEmpty: isEmpty, hasIcons: !shown.isEmpty)
             ForEach(shown) { app in
-                let highlighted = a.highlightFocusedWindow && app.isFocused
-                AppIconView(app: app.appRef, size: iconSize)
-                    .opacity(isActive || app.isFocused ? 1 : 0.8)
-                    .background {
-                        if highlighted {
-                            FocusRing(iconSize: iconSize,
-                                      color: Color(hex: a.accentColor, fallback: .blue))
-                                .matchedGeometryEffect(id: "focused-window", in: ns)
-                        }
-                    }
-                    .overlay(alignment: .bottom) {
-                        if model.multiWindowStyle == .dots && app.windowCount > 1 {
-                            WindowCountDots(count: app.windowCount, iconSize: iconSize, color: model.palette.fill)
-                                .offset(y: max(3, iconSize * 0.2))
-                        }
-                    }
-                    .overlay(alignment: .topTrailing) {
-                        if let badge = model.badge(for: app) {
-                            BadgeView(label: badge, iconSize: iconSize, palette: model.palette)
-                                .offset(x: iconSize * 0.18, y: -iconSize * 0.18)
-                                .transition(.scale.combined(with: .opacity))
-                        }
-                    }
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+                icon(app, isActive: isActive, size: iconSize)
             }
             if hidden > 0 {
-                Text("+\(hidden)")
-                    .font(model.numberFont(size: CGFloat(a.fontSize) * 0.8, weight: .semibold))
-                    .foregroundStyle(model.palette.text.opacity(0.6))
-                    .fixedSize()
+                overflowText(hidden)
             }
         }
         .padding(.horizontal, IslandModel.groupPadding)
         .frame(height: iconSize + 8)
         .background {
-            ActiveHighlight(model: model, ws: ws, ns: ns,
-                            shape: AnyShape(RoundedRectangle(cornerRadius: (iconSize + 8) / 2.6, style: .continuous)),
-                            inactiveFill: model.palette.fill.opacity(isEmpty ? 0 : 0.06))
+            highlight(iconSize: iconSize, isEmpty: isEmpty)
         }
         .scaleEffect(isTarget ? 1.06 : 1)
+    }
+
+    private func labelText(isActive: Bool, isEmpty: Bool, hasIcons: Bool) -> some View {
+        let size = CGFloat(model.config.appearance.fontSize) * 1.05
+        let opacity: Double = isActive ? 1 : (isEmpty ? 0.35 : 0.6)
+        return Text(model.label(for: ws))
+            .font(model.numberFont(size: size, weight: isActive ? .heavy : .semibold))
+            .foregroundStyle(model.palette.text.opacity(opacity))
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.trailing, hasIcons ? 2 : 0)
+    }
+
+    private func overflowText(_ count: Int) -> some View {
+        Text("+\(count)")
+            .font(model.numberFont(size: CGFloat(model.config.appearance.fontSize) * 0.8, weight: .semibold))
+            .foregroundStyle(model.palette.text.opacity(0.6))
+            .fixedSize()
+    }
+
+    private func icon(_ app: WorkspaceApp, isActive: Bool, size: CGFloat) -> some View {
+        let showDots = model.multiWindowStyle == .dots && app.windowCount > 1
+        let badge = model.badge(for: app)
+        let highlighted = model.config.appearance.highlightFocusedWindow && app.isFocused
+        return AppIconView(app: app.appRef, size: size)
+            .opacity(isActive || app.isFocused ? 1 : 0.8)
+            .background {
+                if highlighted {
+                    FocusRing(iconSize: size, color: model.palette.accent)
+                        .matchedGeometryEffect(id: "focused-window", in: ns)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if showDots {
+                    WindowCountDots(count: app.windowCount, iconSize: size, color: model.palette.fill)
+                        .offset(y: max(3, size * 0.2))
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if let badge {
+                    BadgeView(label: badge, iconSize: size, palette: model.palette)
+                        .offset(x: size * 0.18, y: -size * 0.18)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .transition(.scale(scale: 0.5).combined(with: .opacity))
+    }
+
+    private func highlight(iconSize: CGFloat, isEmpty: Bool) -> some View {
+        let shape = AnyShape(RoundedRectangle(cornerRadius: (iconSize + 8) / 2.6, style: .continuous))
+        return ActiveHighlight(model: model, ws: ws, ns: ns, shape: shape,
+                               inactiveFill: model.palette.fill.opacity(isEmpty ? 0 : 0.06))
     }
 }
 
