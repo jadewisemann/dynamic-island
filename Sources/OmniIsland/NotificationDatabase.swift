@@ -230,7 +230,8 @@ final class NotificationDatabaseWatcher {
 
     private func start() {
         guard timer == nil else { return }
-        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+        // File events below catch most writes at once; the timer is a fallback.
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
         t.tolerance = 0.3
@@ -242,13 +243,57 @@ final class NotificationDatabaseWatcher {
     private func stop() {
         timer?.invalidate()
         timer = nil
+        unwatch()
         path = nil
         lastId = nil
         status = .off
     }
 
+    // MARK: - File events
+
+    private var sources: [DispatchSourceFileSystemObject] = []
+    private var watchedPath: String?
+    private var pollAgain = false
+
+    /// Watches the database and its write-ahead log, so a new row is read
+    /// right after usernoted writes it instead of on the next timer tick.
+    private func watch(_ path: String) {
+        guard watchedPath != path else { return }
+        unwatch()
+        watchedPath = path
+        for file in [path, path + "-wal"] {
+            let fd = open(file, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd, eventMask: [.write, .extend, .delete, .rename], queue: .main)
+            source.setEventHandler { [weak self, weak source] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let flags = source?.data ?? []
+                    if flags.contains(.delete) || flags.contains(.rename) {
+                        // The log was replaced; watch the new file.
+                        self.unwatch()
+                    }
+                    self.poll()
+                }
+            }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            sources.append(source)
+        }
+    }
+
+    private func unwatch() {
+        sources.forEach { $0.cancel() }
+        sources.removeAll()
+        watchedPath = nil
+    }
+
     private func poll() {
-        guard !reading else { return }
+        guard !reading else {
+            pollAgain = true
+            return
+        }
         reading = true
         let knownPath = path
         let after = lastId
@@ -260,6 +305,11 @@ final class NotificationDatabaseWatcher {
                     self.reading = false
                     guard self.timer != nil else { return }
                     self.apply(outcome)
+                    if let path = self.path { self.watch(path) } else { self.unwatch() }
+                    if self.pollAgain {
+                        self.pollAgain = false
+                        self.poll()
+                    }
                 }
             }
         }

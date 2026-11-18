@@ -191,29 +191,54 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The last few notifications, newest first; a row opens its app.
     @ViewBuilder private var recent: some View {
         let size = CGFloat(model.config.appearance.fontSize)
         let p = model.palette
-        HStack(spacing: 6) {
-            if let latest = model.recentNotifications.first {
-                HStack(spacing: -3) {
-                    ForEach(Array(model.recentNotifications.prefix(4))) { n in
-                        NotificationIcon(notification: n, size: 14)
-                    }
-                }
-                Text("\(model.visibleText(latest).title) · \(relative(latest.date))")
-                    .font(model.textFont(size: size * 0.78, weight: .regular))
-                    .foregroundStyle(p.secondary)
-                    .lineLimit(1)
-            } else {
+        let list = Array(model.recentNotifications.prefix(IslandModel.dashboardHistoryRows))
+        if list.isEmpty {
+            HStack(spacing: 6) {
                 Image(systemName: "bell.slash")
                     .font(.system(size: size * 0.75))
-                    .foregroundStyle(p.secondary)
                 Text("최근 알림이 없습니다")
                     .font(model.textFont(size: size * 0.78, weight: .regular))
-                    .foregroundStyle(p.secondary)
+            }
+            .foregroundStyle(p.secondary)
+            .frame(height: IslandModel.dashboardRowHeight)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(list) { n in
+                    historyRow(n, size: size)
+                }
             }
         }
+    }
+
+    private func historyRow(_ n: IslandNotification, size: CGFloat) -> some View {
+        let p = model.palette
+        let text = model.visibleText(n)
+        let detail = [text.subtitle, text.body].compactMap { $0 }.joined(separator: " · ")
+        return HStack(spacing: 6) {
+            NotificationIcon(notification: n, size: 15)
+            Text(text.title)
+                .font(model.textFont(size: size * 0.8, weight: .semibold))
+                .lineLimit(1)
+                .layoutPriority(1)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(model.textFont(size: size * 0.78, weight: .regular))
+                    .foregroundStyle(p.text.opacity(0.7))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Text(relative(n.date))
+                .font(model.textFont(size: size * 0.72, weight: .regular))
+                .foregroundStyle(p.secondary)
+                .fixedSize()
+        }
+        .frame(height: IslandModel.dashboardRowHeight)
+        .contentShape(Rectangle())
+        .onTapGesture { model.open(n) }
     }
 
     private func placeholder(_ text: String) -> some View {

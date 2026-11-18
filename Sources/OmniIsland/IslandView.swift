@@ -111,12 +111,14 @@ struct IslandView: View {
                 NotificationCard(model: model, notification: n)
                     .frame(height: IslandModel.notificationCardHeight)
                     .padding(.horizontal, 16)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.open(n) }
                     .id(n.id)
                     .transition(fade)
             }
             if model.phase == .dashboard {
                 DashboardView(model: model)
-                    .frame(height: IslandModel.dashboardHeight)
+                    .frame(height: model.dashboardHeight)
                     .padding(.horizontal, max(model.contentPadding, 16))
                     .transition(fade)
             }

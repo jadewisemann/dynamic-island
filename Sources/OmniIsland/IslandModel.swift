@@ -67,6 +67,10 @@ final class IslandModel: ObservableObject {
     var onActivateApp: ((WorkspaceApp, WorkspaceItem) -> Void)?
     /// Clicked a workspace label or pill.
     var onFocusWorkspace: ((WorkspaceItem) -> Void)?
+    /// Clicked a notification card or a row of the notification history.
+    var onOpenNotification: ((IslandNotification) -> Void)?
+    /// The notification history changed (for the menu bar list).
+    var onRecentChange: (() -> Void)?
     private var showWork: DispatchWorkItem?
     private var hideWork: DispatchWorkItem?
     private var collapseWork: DispatchWorkItem?
@@ -203,14 +207,40 @@ final class IslandModel: ObservableObject {
     }
 
     /// Whether the island takes clicks right now.
-    var acceptsClicks: Bool { phase.isModifierPhase && !isPreview }
+    var acceptsClicks: Bool { (phase.isModifierPhase || phase == .notification) && !isPreview }
 
     func setPointerInside(_ inside: Bool) {
         guard inside != pointerInside else { return }
         pointerInside = inside
-        if !inside && !modifierHeld && phase.isModifierPhase {
+        if phase == .notification {
+            // Keep the card up while the pointer rests on it.
+            if inside { notificationWork?.cancel() } else { scheduleNotificationEnd() }
+        } else if !inside && !modifierHeld && phase.isModifierPhase {
             scheduleHide()
         }
+    }
+
+    func open(_ n: IslandNotification) {
+        guard acceptsClicks else { return }
+        onOpenNotification?(n)
+        missedNotifications.removeAll { $0.id == n.id }
+        if phase == .notification {
+            notificationWork?.cancel()
+            pointerInside = false
+            if !showNextNotification() { setPhase(.hidden) }
+        } else {
+            closeAfterClick()
+        }
+    }
+
+    static let recentLimit = 30
+
+    func clearRecent() {
+        animate {
+            self.recentNotifications = []
+            self.missedNotifications = []
+        }
+        onRecentChange?()
     }
 
     // MARK: - Clicks
@@ -297,7 +327,10 @@ final class IslandModel: ObservableObject {
         guard allows(n) else { return }
         let c = config.notifications
         recentNotifications.insert(n, at: 0)
-        if recentNotifications.count > 8 { recentNotifications.removeLast(recentNotifications.count - 8) }
+        if recentNotifications.count > Self.recentLimit {
+            recentNotifications.removeLast(recentNotifications.count - Self.recentLimit)
+        }
+        onRecentChange?()
 
         // Same app again while its card is up: replace the card's content.
         if phase == .notification, let current = notification, current.groupKey == n.groupKey,
@@ -764,7 +797,21 @@ final class IslandModel: ObservableObject {
 
     static let indicatorEarWidth: CGFloat = 34
     static let notificationCardHeight: CGFloat = 78
-    static let dashboardHeight: CGFloat = 112
+    static let dashboardRowHeight: CGFloat = 22
+    static let dashboardHistoryRows = 3
+
+    /// Height under the workspace row in the dashboard: clock and events on
+    /// top, then up to three rows of notification history.
+    var dashboardHeight: CGFloat {
+        let items = config.dashboard.items.map { $0.lowercased() }
+        var height: CGFloat = 19
+        if items.contains("clock") || items.contains("events") { height += 64 }
+        if items.contains("notifications") {
+            let rows = max(1, min(recentNotifications.count, Self.dashboardHistoryRows))
+            height += CGFloat(rows) * Self.dashboardRowHeight + 8
+        }
+        return height
+    }
 
     var hiddenSize: CGSize {
         let ears = showsIndicator ? 2 * Self.indicatorEarWidth : 0
@@ -778,7 +825,7 @@ final class IslandModel: ObservableObject {
 
     var dashboardSize: CGSize {
         let width = max(compactSize.width, 380)
-        return CGSize(width: width, height: centerSize.height + Self.dashboardHeight)
+        return CGSize(width: width, height: centerSize.height + dashboardHeight)
     }
 
     var currentSize: CGSize {

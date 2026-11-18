@@ -242,10 +242,13 @@ enum NotificationBannerReader {
     static func dismiss(_ element: AXUIElement) -> Bool {
         var names: CFArray?
         if AXUIElementCopyActionNames(element, &names) == .success, let actions = names as? [String] {
+            // "Close" keeps the notification in Notification Center; "clear"
+            // removes it, so it is only the last resort.
             let closeWords = ["close", "닫기", "dismiss", "clear", "지우기"]
-            if let action = actions.first(where: { name in
-                closeWords.contains { name.lowercased().contains($0) }
-            }) {
+            let ranked = closeWords.lazy.compactMap { word in
+                actions.first { $0.lowercased().contains(word) }
+            }
+            if let action = ranked.first {
                 return AXUIElementPerformAction(element, action as CFString) == .success
             }
         }
@@ -360,10 +363,10 @@ final class NotificationWatcher {
         isRunning = true
         primed = false
         attach()
-        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
-        timer.tolerance = 0.5
+        timer.tolerance = 0.2
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
     }
@@ -393,6 +396,20 @@ final class NotificationWatcher {
         appendLog(lines.joined(separator: "\n") + "\n")
         scheduleScan(after: 0)
         return Self.logURL
+    }
+
+    /// Closes every banner on screen now. Used when the database reported
+    /// a notification first, so its banner does not linger on the right.
+    func dismissVisibleBanners() {
+        guard isRunning, observedPid != 0 else { return }
+        let pid = observedPid
+        for delay in [0.15, 0.6] {
+            queue.asyncAfter(deadline: .now() + delay) {
+                let snapshot = NotificationBannerReader.snapshot(pid: pid)
+                guard !snapshot.panelOpen, snapshot.items.count <= 3 else { return }
+                for item in snapshot.items { NotificationBannerReader.dismiss(item.element) }
+            }
+        }
     }
 
     // MARK: - Observer

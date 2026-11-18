@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsModel: SettingsModel?
     private var settingsController: SettingsWindowController?
     private let onboarding = OnboardingWindowController()
+    private var recentMenu = NSMenu()
 
     private let isDemo = CommandLine.arguments.contains("--demo")
     private var appearanceObservation: NSKeyValueObservation?
@@ -71,6 +72,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onFocusWorkspace = { [weak self] ws in
             self?.focusWorkspace(ws)
         }
+        model.onOpenNotification = { [weak self] n in
+            self?.openNotification(n)
+        }
+        model.onRecentChange = { [weak self] in
+            self?.rebuildRecentMenu()
+        }
 
         client.onMessage = { [weak self] message in
             self?.tracker.handle(message)
@@ -96,7 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.receive(notification)
         }
         notificationDatabase.onNotification = { [weak self] notification in
-            self?.receive(notification)
+            guard let self else { return }
+            self.receive(notification)
+            if self.configStore.config.notifications.dismissSystemBanner {
+                self.notificationWatcher.dismissVisibleBanners()
+            }
         }
         notificationDatabase.onStatus = { [weak self] status in
             self?.settingsModel?.notificationDatabaseStatus = status
@@ -208,6 +219,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationDatabase.configure(enabled: config.notifications.enabled && config.notifications.readDatabase && !isDemo)
         settingsModel?.calendarAccess = calendarProvider.access
         settingsModel?.notificationDatabaseStatus = notificationDatabase.status
+    }
+
+    // MARK: - Notification history
+
+    private func openNotification(_ n: IslandNotification) {
+        let bundleId = n.source == .calendar ? "com.apple.iCal" : n.bundleId
+        if let bundleId, !bundleId.isEmpty { activateApp(bundleId: bundleId) }
+    }
+
+    private func rebuildRecentMenu() {
+        recentMenu.removeAllItems()
+        let list = model.recentNotifications
+        if list.isEmpty {
+            let empty = NSMenuItem(title: "받은 알림이 없습니다", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            recentMenu.addItem(empty)
+            return
+        }
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("HHmm")
+        for (index, n) in list.prefix(15).enumerated() {
+            let text = model.visibleText(n)
+            var title = "\(formatter.string(from: n.date))  \(n.appName) · \(text.title)"
+            if let body = text.body ?? text.subtitle { title += " — " + body }
+            if title.count > 80 { title = String(title.prefix(79)) + "…" }
+            let item = NSMenuItem(title: title, action: #selector(openRecent(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            recentMenu.addItem(item)
+        }
+        recentMenu.addItem(.separator())
+        recentMenu.addItem(makeItem("기록 지우기", #selector(clearRecent), ""))
+    }
+
+    @objc private func openRecent(_ sender: NSMenuItem) {
+        let list = model.recentNotifications
+        guard list.indices.contains(sender.tag) else { return }
+        openNotification(list[sender.tag])
+    }
+
+    @objc private func clearRecent() {
+        model.clearRecent()
     }
 
     // MARK: - Permissions
@@ -327,6 +380,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationMenu.addItem(makeItem("알림 배너 구조 기록 (1분)", #selector(recordNotificationDiagnostics), ""))
         notifications.submenu = notificationMenu
         menu.addItem(notifications)
+        let recent = NSMenuItem(title: "최근 알림", action: nil, keyEquivalent: "")
+        recentMenu = NSMenu()
+        recent.submenu = recentMenu
+        menu.addItem(recent)
+        rebuildRecentMenu()
         menu.addItem(makeItem("설정…", #selector(showSettings), ","))
         menu.addItem(makeItem("설정 파일 열기", #selector(openConfig), ""))
         menu.addItem(makeItem("설정 다시 불러오기", #selector(reloadConfig), "r"))
