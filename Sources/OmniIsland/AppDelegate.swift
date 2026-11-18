@@ -230,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configStore.save(config)
     }
 
-    @objc private func showOnboarding() {
+    @objc private func showPermissionsWindow() {
         onboarding.show(steps: OnboardingStore.relevant(for: configStore.config))
     }
 
@@ -316,7 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ax.target = self
         menu.addItem(ax)
         accessibilityMenuItem = ax
-        menu.addItem(makeItem("권한 설정…", #selector(showOnboarding), ""))
+        menu.addItem(makeItem("권한 설정…", #selector(showPermissionsWindow), ""))
 
         menu.addItem(.separator())
         menu.addItem(makeItem("애니메이션 미리보기", #selector(playDemo), "p"))
