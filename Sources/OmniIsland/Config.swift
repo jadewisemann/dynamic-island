@@ -251,6 +251,8 @@ struct IslandConfig: Equatable {
         var enabled = true
         /// Global shortcut, e.g. "option+h", "control+space".
         var hotkey = "option+h"
+        /// Switch to an English input source while open, and back on close.
+        var englishInput = true
         var maxResults = 10.0
         /// With an empty query, list recently opened apps.
         var showRecent = true
@@ -622,6 +624,7 @@ extension IslandConfig {
         let la = r.sub("launcher")
         c.launcher.enabled = la.bool("enabled", c.launcher.enabled)
         c.launcher.hotkey = la.string("hotkey", c.launcher.hotkey)
+        c.launcher.englishInput = la.bool("englishInput", c.launcher.englishInput)
         c.launcher.maxResults = la.number("maxResults", c.launcher.maxResults)
         c.launcher.showRecent = la.bool("showRecent", c.launcher.showRecent)
         c.launcher.recentCount = la.number("recentCount", c.launcher.recentCount)
@@ -981,6 +984,8 @@ extension IslandConfig {
             "enabled": \(b(la.enabled)),
             // option+h | option+space | control+space | option+command+space ...
             "hotkey": \(q(la.hotkey)),
+            // 런처를 열 때 입력 소스를 영어로 바꾸고, 닫으면 원래 입력 소스로 되돌립니다.
+            "englishInput": \(b(la.englishInput)),
             "maxResults": \(n(la.maxResults)),
             // 검색어가 없을 때 최근에 연 앱을 보여 줍니다.
             "showRecent": \(b(la.showRecent)),

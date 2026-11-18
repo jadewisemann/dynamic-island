@@ -172,6 +172,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `calendar.alertMinutes` / `showAlerts` / `includeAllDay` | `[5, 0]` / `true` / `false` | 일정 시작 몇 분 전에 카드를 띄울지 정합니다. |
 | `dashboard.enabled` / `holdMs` / `items` | `false` / `800` / `["clock", "events", "notifications"]` | 트리거 키를 더 오래 누르면 큰 시계, 오늘 남은 일정, 최근 알림을 보여 줍니다. |
 | `launcher.enabled` / `hotkey` | `true` / `"option+h"` | 런처를 켜고 끄며, 여는 단축키를 정합니다. `option+space`, `control+space`처럼 적습니다. |
+| `launcher.englishInput` | `true` | 런처를 열 때 입력 소스를 영어로 바꾸고, 닫으면 원래 입력 소스로 되돌립니다 (Flow Launcher의 "항상 영어로 입력 시작"과 같습니다). |
 | `launcher.maxResults` | `10` | 한 번에 보여 줄 최대 결과 수입니다. |
 | `launcher.showRecent` / `recentCount` | `true` / `5` | 검색어가 없을 때 최근에 연 앱을 보여 줍니다. |
 | `launcher.searchApps` / `searchWindows` / `calculator` | `true` | 검색 대상을 종류별로 켜고 끕니다. |
