@@ -16,6 +16,12 @@ struct LauncherItem: Identifiable, Equatable {
         case app(AppEntry)
         case window(LauncherWindow)
         case calculation(Double)
+        case currency(CurrencyAnswer?)
+        case file(FileHit)
+        case pane(SettingsPane)
+        case islandSettings
+        /// A web address or search: what to open, and an SF Symbol.
+        case web(URL, symbol: String)
     }
 
     let id: String
@@ -31,6 +37,11 @@ struct LauncherItem: Identifiable, Equatable {
         case .app: return "앱"
         case .window: return "창"
         case .calculation: return "계산기"
+        case .currency: return "환율"
+        case .file(let f): return f.isDirectory ? "폴더" : "파일"
+        case .pane: return "시스템 설정"
+        case .islandSettings: return "OmniIsland"
+        case .web: return "웹"
         }
     }
 }
@@ -57,6 +68,16 @@ final class LauncherModel: ObservableObject {
     var onRevealApp: ((AppEntry) -> Void)?
     var onFocusWindow: ((LauncherWindow) -> Void)?
     var onSummonWindow: ((LauncherWindow) -> Void)?
+    var onOpenSettings: (() -> Void)?
+
+    // Answers that arrive later, each for the query it was asked with.
+    private var epoch = 0
+    private var asyncWork: DispatchWorkItem?
+    private var files: (query: String, hits: [(FileHit, FuzzyMatch)]) = ("", [])
+    private var suggestions: (query: String, words: [String]) = ("", [])
+    private var suggestionCache: [String: [String]] = [:]
+    private var currencyCache: [CurrencyQuery: CurrencyAnswer] = [:]
+    private var currencyFailed: Set<CurrencyQuery> = []
 
     init() {
         apps.onUpdate = { [weak self] in self?.refresh() }
@@ -71,6 +92,8 @@ final class LauncherModel: ObservableObject {
         query = ""
         selection = 0
         querySerial &+= 1
+        files = ("", [])
+        suggestions = ("", [])
         refresh()
     }
 
@@ -80,6 +103,7 @@ final class LauncherModel: ObservableObject {
         query = cleaned
         selection = 0
         refresh()
+        scheduleAsync()
     }
 
     /// Esc: clears the query first, closes on an empty one.
@@ -94,14 +118,18 @@ final class LauncherModel: ObservableObject {
         }
     }
 
-    /// Tab / →: takes the top result's name when it starts with the query.
+    /// Tab / →: takes the top result's name (or Google's first completion)
+    /// when it starts with the query.
     func complete() -> Bool {
-        guard let first = results.first, !query.isEmpty,
-              first.title.lowercased().hasPrefix(query.lowercased()), first.title.count > query.count
+        guard !query.isEmpty else { return false }
+        let lower = query.lowercased()
+        let candidates = results.prefix(1).map(\.title) + currentSuggestions.prefix(1)
+        guard let pick = candidates.first(where: { $0.lowercased().hasPrefix(lower) && $0.count > query.count })
         else { return false }
-        query = first.title
+        query = pick
         querySerial &+= 1
         refresh()
+        scheduleAsync()
         return true
     }
 
@@ -115,6 +143,7 @@ final class LauncherModel: ObservableObject {
         let i = index ?? selection
         guard results.indices.contains(i) else { return }
         let item = results[i]
+        if case .currency(nil) = item.kind { return }
         onClose?()
         switch item.kind {
         case .app(let app):
@@ -127,22 +156,105 @@ final class LauncherModel: ObservableObject {
         case .window(let window):
             if alternate { onSummonWindow?(window) } else { onFocusWindow?(window) }
         case .calculation(let value):
-            let board = NSPasteboard.general
-            board.clearContents()
-            board.setString(Calculator.plain(value), forType: .string)
+            copy(Calculator.plain(value))
+        case .currency(let answer):
+            if let answer { copy(Calculator.plain((answer.value * 100).rounded() / 100)) }
+        case .file(let file):
+            let url = URL(fileURLWithPath: file.path)
+            if alternate { NSWorkspace.shared.activateFileViewerSelecting([url]) } else { NSWorkspace.shared.open(url) }
+        case .pane(let pane):
+            if let url = pane.url { NSWorkspace.shared.open(url) }
+        case .islandSettings:
+            onOpenSettings?()
+        case .web(let url, _):
+            NSWorkspace.shared.open(url)
         }
+    }
+
+    private func copy(_ text: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
+    }
+
+    // MARK: - Answers that arrive later
+
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
+
+    private func scheduleAsync() {
+        asyncWork?.cancel()
+        epoch &+= 1
+        let q = trimmedQuery
+        guard !q.isEmpty else { return }
+        let asked = epoch
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.ask(q, epoch: asked) }
+        }
+        asyncWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
+    }
+
+    private func ask(_ q: String, epoch asked: Int) {
+        guard asked == epoch else { return }
+        if config.searchFiles {
+            let limit = max(1, Int(config.maxFiles))
+            DispatchQueue.global(qos: .userInitiated).async {
+                let found = FileSearch.find(q, limit: limit)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { [weak self] in
+                        guard let self, asked == self.epoch else { return }
+                        self.files = (q, found)
+                        self.refresh()
+                    }
+                }
+            }
+        }
+        if config.webSearch && config.suggestions && WebSearch.eligible(q) {
+            if let cached = suggestionCache[q.lowercased()] {
+                suggestions = (q, cached)
+                refresh()
+            } else {
+                WebSearch.suggestions(for: q) { [weak self] words in
+                    guard let self, let words else { return }
+                    self.suggestionCache[q.lowercased()] = words
+                    guard asked == self.epoch else { return }
+                    self.suggestions = (q, words)
+                    self.refresh()
+                }
+            }
+        }
+        if config.currency, let cq = Currency.parse(q), currencyCache[cq] == nil, !currencyFailed.contains(cq) {
+            Currency.fetch(cq) { [weak self] answer in
+                guard let self else { return }
+                if let answer { self.currencyCache[cq] = answer } else { self.currencyFailed.insert(cq) }
+                self.refresh()
+            }
+        }
+    }
+
+    /// Completions for the query, or the ones for fewer letters that still
+    /// begin with it, so the rows don't blink at every key.
+    private var currentSuggestions: [String] {
+        let q = trimmedQuery.lowercased()
+        guard !q.isEmpty, !suggestions.words.isEmpty, q.hasPrefix(suggestions.query.lowercased()) else { return [] }
+        return suggestions.words.filter { $0.lowercased().hasPrefix(q) && $0.lowercased() != q }
     }
 
     // MARK: - Searching
 
     private func refresh() {
+        let selectedId = results.indices.contains(selection) ? results[selection].id : nil
         results = search(query)
-        if selection >= results.count { selection = 0 }
+        if let selectedId, selection != 0, let kept = results.firstIndex(where: { $0.id == selectedId }) {
+            selection = kept
+        } else if selection >= results.count {
+            selection = 0
+        }
         onLayoutChange?()
     }
 
     private func search(_ text: String) -> [LauncherItem] {
-        let limit = max(1, Int(config.maxResults))
+        let limit = max(3, Int(config.maxResults))
         let q = text.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
             guard config.showRecent else { return [] }
@@ -152,12 +264,29 @@ final class LauncherModel: ObservableObject {
             }
         }
 
-        var items: [LauncherItem] = []
+        // Answers on top.
+        var answers: [LauncherItem] = []
         if config.calculator, let value = Calculator.evaluate(q) {
-            items.append(LauncherItem(id: "calc", kind: .calculation(value), title: "= " + Calculator.format(value),
-                                      subtitle: "Return를 누르면 결과를 복사합니다", hits: [], score: 2000))
+            answers.append(LauncherItem(id: "calc", kind: .calculation(value), title: "= " + Calculator.format(value),
+                                        subtitle: "Return을 누르면 결과를 복사합니다", hits: [], score: 0))
+        }
+        if config.currency, let cq = Currency.parse(q) {
+            let title = "\(Calculator.format(cq.amount)) \(cq.from) → \(cq.to)"
+            if let answer = currencyCache[cq] {
+                answers.append(LauncherItem(
+                    id: "currency", kind: .currency(answer),
+                    title: "\(Calculator.format((answer.value * 100).rounded() / 100)) \(cq.to)",
+                    subtitle: "\(title) · ECB \(answer.date) 기준 · Return을 누르면 복사합니다", hits: [], score: 0))
+            } else {
+                let failed = currencyFailed.contains(cq)
+                answers.append(LauncherItem(id: "currency", kind: .currency(nil), title: title,
+                                            subtitle: failed ? "환율을 가져오지 못했습니다" : "환율을 가져오는 중입니다…",
+                                            hits: [], score: 0))
+            }
         }
 
+        // Local results, ranked together.
+        var items: [LauncherItem] = []
         if config.searchApps {
             for app in apps.apps {
                 guard let names = apps.candidates[app.path] else { continue }
@@ -193,11 +322,79 @@ final class LauncherModel: ObservableObject {
             }
         }
 
+        if config.searchSettings {
+            for (pane, match) in SettingsPanes.search(q) {
+                items.append(LauncherItem(id: "pane:" + pane.id, kind: .pane(pane), title: pane.displayName,
+                                          subtitle: "시스템 설정", hits: match.hits, score: match.score - 60))
+            }
+            let own = ["settings", "설정", "omniisland", "preferences", "환경설정"]
+                .compactMap { FuzzyMatcher.match(q, FuzzyMatcher.Candidate($0)) }
+                .filter { $0.score >= 600 }
+                .map(\.score).max()
+            if let own {
+                items.append(LauncherItem(id: "island-settings", kind: .islandSettings, title: "OmniIsland 설정",
+                                          subtitle: "아일랜드의 모양, 위젯, 런처를 바꿉니다", hits: [], score: own - 80))
+            }
+        }
+
+        if config.searchFiles, !files.hits.isEmpty, q.lowercased().hasPrefix(files.query.lowercased()) {
+            for (file, _) in files.hits {
+                // Re-rank against what is typed now; drop what no longer matches.
+                // Spotlight's own matches (diacritics, inside words) stay for the query they answered.
+                var match = FuzzyMatcher.match(q, FuzzyMatcher.Candidate(file.name))
+                if match == nil && q == files.query { match = FuzzyMatch(score: 100, hits: []) }
+                guard let match else { continue }
+                let folder = (file.path as NSString).deletingLastPathComponent
+                    .replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
+                items.append(LauncherItem(id: "file:" + file.path, kind: .file(file), title: file.name,
+                                          subtitle: folder, hits: match.hits, score: match.score - 120))
+            }
+        }
+
         items.sort { a, b in
             a.score != b.score ? a.score > b.score
                 : a.title.localizedStandardCompare(b.title) == .orderedAscending
         }
-        return Array(items.prefix(limit))
+
+        // The web last: an address, a search for exactly what is typed, then
+        // Google's completions and the other engines.
+        var web: [LauncherItem] = []
+        if let address = WebSearch.address(q) {
+            web.append(LauncherItem(id: "address", kind: .web(address, symbol: "safari"),
+                                    title: address.absoluteString, subtitle: "브라우저에서 열기", hits: [], score: 0))
+        }
+        if config.webSearch, let url = WebSearch.googleURL(q) {
+            web.append(LauncherItem(id: "google", kind: .web(url, symbol: "magnifyingglass"),
+                                    title: q, subtitle: "Google에서 검색", hits: [], score: 0))
+            if config.suggestions {
+                for word in currentSuggestions.prefix(max(0, Int(config.maxSuggestions))) {
+                    guard let url = WebSearch.googleURL(word) else { continue }
+                    web.append(LauncherItem(id: "suggest:" + word, kind: .web(url, symbol: "magnifyingglass"),
+                                            title: word, subtitle: "Google 추천 검색어",
+                                            hits: Array(min(q.count, word.count)..<word.count), score: 0))
+                }
+            }
+        }
+        if config.askClaude, let url = WebSearch.url("https://claude.ai/new", "q", q) {
+            web.append(LauncherItem(id: "claude", kind: .web(url, symbol: "sparkles"),
+                                    title: q, subtitle: "Claude에게 묻기", hits: [], score: 0))
+        }
+        if config.askGrok, let url = WebSearch.url("https://grok.com/", "q", q) {
+            web.append(LauncherItem(id: "grok", kind: .web(url, symbol: "bubble.left.and.text.bubble.right"),
+                                    title: q, subtitle: "Grok에게 묻기", hits: [], score: 0))
+        }
+        if config.searchX, let url = WebSearch.url("https://x.com/search", "q", q) {
+            web.append(LauncherItem(id: "x", kind: .web(url, symbol: "number"),
+                                    title: q, subtitle: "X에서 검색", hits: [], score: 0))
+        }
+
+        // Answers and local rows first; the web keeps at least its first row
+        // (a search for what is typed) so Return always does something.
+        let reservedForWeb = min(web.count, max(1, limit - answers.count - items.count))
+        let localRoom = max(0, limit - answers.count - reservedForWeb)
+        var list = answers + items.prefix(localRoom)
+        list += web.prefix(limit - list.count)
+        return list
     }
 
     // MARK: - Layout
@@ -223,6 +420,6 @@ final class LauncherModel: ObservableObject {
     /// Tallest the launcher can get, for sizing the panel.
     var maximumBodyHeight: CGFloat {
         Self.fieldHeight + Self.verticalPadding + Self.headerHeight
-            + CGFloat(max(1, Int(config.maxResults))) * Self.rowHeight
+            + CGFloat(max(3, Int(config.maxResults))) * Self.rowHeight
     }
 }

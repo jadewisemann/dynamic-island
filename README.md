@@ -171,9 +171,13 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `calendar.alertMinutes` / `showAlerts` / `includeAllDay` | `[5, 0]` / `true` / `false` | 일정 시작 몇 분 전에 카드를 띄울지 정합니다. |
 | `dashboard.enabled` / `holdMs` / `items` | `false` / `800` / `["clock", "events", "notifications"]` | 트리거 키를 더 오래 누르면 큰 시계, 오늘 남은 일정, 최근 알림을 보여 줍니다. |
 | `launcher.enabled` / `hotkey` | `true` / `"option+h"` | 런처를 켜고 끄며, 여는 단축키를 정합니다. `option+space`, `control+space`처럼 적습니다. |
-| `launcher.maxResults` | `8` | 한 번에 보여 줄 최대 결과 수입니다. |
+| `launcher.maxResults` | `10` | 한 번에 보여 줄 최대 결과 수입니다. |
 | `launcher.showRecent` / `recentCount` | `true` / `5` | 검색어가 없을 때 최근에 연 앱을 보여 줍니다. |
 | `launcher.searchApps` / `searchWindows` / `calculator` | `true` | 검색 대상을 종류별로 켜고 끕니다. |
+| `launcher.currency` / `searchSettings` | `true` | 환율 변환과 시스템 설정 패널 검색입니다. |
+| `launcher.searchFiles` / `maxFiles` | `true` / `4` | 홈 폴더의 파일을 Spotlight에서 찾습니다. |
+| `launcher.webSearch` / `suggestions` / `maxSuggestions` | `true` / `true` / `3` | "Google에서 검색" 줄과 추천 검색어입니다. |
+| `launcher.askClaude` / `askGrok` / `searchX` | `false` | 입력한 내용을 Claude, Grok에 묻거나 X에서 찾는 줄을 붙입니다. |
 | `launcher.width` | `560` | 런처가 열렸을 때 아일랜드의 너비입니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
@@ -198,7 +202,13 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 
 Option을 누르고 있으면 평소처럼 아일랜드가 내려오고, 이어서 H를 누르면(⌥H) 아일랜드가 넓어지면서 키보드 입력을 받습니다. 이때부터는 Option을 떼도 닫히지 않습니다. 앱은 계속 원래 쓰던 앱이 활성 상태로 남고, 아일랜드만 입력을 받습니다.
 
-- **검색 대상**: `/Applications`, `/System/Applications`, `~/Applications` 등에 있는 앱(한글 이름과 영어 이름 모두, `ㄱㅅㄱ`처럼 초성으로도 찾습니다), OmniWM에 열려 있는 창(앱 이름이나 창 제목), `2^10*3` 같은 수식입니다.
+- **검색 대상** ([nanolight](https://github.com/justrach/nanolight)의 기능을 옮겼습니다)
+  - 앱: `/Applications`, `/System/Applications`, `~/Applications` 등에 있는 앱입니다. 한글 이름과 영어 이름 모두, `ㄱㅅㄱ`처럼 초성으로도 찾습니다.
+  - OmniWM에 열려 있는 창: 앱 이름이나 창 제목으로 찾습니다.
+  - 시스템 설정 패널: "wifi", "다크 모드", "로그인 항목", "단축키"처럼 입력하면 그 패널을 바로 엽니다. "설정"을 입력하면 OmniIsland 설정도 나옵니다.
+  - 파일: 홈 폴더의 파일과 폴더를 Spotlight 색인에서 찾습니다. ⌘Return을 누르면 Finder에서 보여 줍니다.
+  - 계산기와 환율: `2^10*3`, `0xC00`, `100 USD to KRW`, `100달러`, `5000엔`처럼 입력합니다. 환율은 [Frankfurter](https://www.frankfurter.app)의 ECB 일일 환율이며, Return을 누르면 결과를 복사합니다.
+  - 웹: 맨 아래에 "Google에서 검색" 줄과 Google 추천 검색어가 붙습니다. `github.com/x`처럼 주소를 입력하면 바로 열 수 있고, 설정에서 Claude, Grok, X 줄을 켤 수 있습니다. 추천 검색어는 입력한 글자를 Google에 보내므로 끌 수 있고, 주소처럼 보이는 입력(점, 슬래시, @)은 보내지 않습니다.
 - **순위**: 이름 전체 일치, 앞부분 일치, 단어 시작 일치, 머리글자(`vsc` → Visual Studio Code), 중간 일치, 글자 순서 일치, 오타(`chorme` → Chrome) 순서로 점수를 매기고, 런처에서 자주 연 앱일수록 위로 올립니다. 실행 기록은 `~/.config/omni-island/launcher-history.json`에 저장됩니다.
 - **검색어가 없을 때**: 최근에 연 앱 5개를 보여 줍니다. 아직 기록이 없으면 실행 중인 앱으로 채웁니다.
 

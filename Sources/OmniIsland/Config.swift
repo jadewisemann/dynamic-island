@@ -246,7 +246,7 @@ struct IslandConfig: Equatable {
         var enabled = true
         /// Global shortcut, e.g. "option+h", "control+space".
         var hotkey = "option+h"
-        var maxResults = 8.0
+        var maxResults = 10.0
         /// With an empty query, list recently opened apps.
         var showRecent = true
         var recentCount = 5.0
@@ -254,6 +254,20 @@ struct IslandConfig: Equatable {
         /// Windows OmniWM manages; Return focuses one, ⌘Return brings it here.
         var searchWindows = true
         var calculator = true
+        /// "100 USD to KRW", "100달러": ECB daily rates from Frankfurter.
+        var currency = true
+        /// Files in the home folder, from the Spotlight index.
+        var searchFiles = true
+        var maxFiles = 4.0
+        /// System Settings panes ("wifi", "다크 모드") and OmniIsland's own settings.
+        var searchSettings = true
+        /// A "search Google" row, and Google's completions under it.
+        var webSearch = true
+        var suggestions = true
+        var maxSuggestions = 3.0
+        var askClaude = false
+        var askGrok = false
+        var searchX = false
         /// Width of the island while the launcher is open.
         var width = 560.0
     }
@@ -575,6 +589,16 @@ extension IslandConfig {
         c.launcher.searchWindows = la.bool("searchWindows", c.launcher.searchWindows)
         c.launcher.calculator = la.bool("calculator", c.launcher.calculator)
         c.launcher.width = la.number("width", c.launcher.width)
+        c.launcher.currency = la.bool("currency", c.launcher.currency)
+        c.launcher.searchFiles = la.bool("searchFiles", c.launcher.searchFiles)
+        c.launcher.maxFiles = la.number("maxFiles", c.launcher.maxFiles)
+        c.launcher.searchSettings = la.bool("searchSettings", c.launcher.searchSettings)
+        c.launcher.webSearch = la.bool("webSearch", c.launcher.webSearch)
+        c.launcher.suggestions = la.bool("suggestions", c.launcher.suggestions)
+        c.launcher.maxSuggestions = la.number("maxSuggestions", c.launcher.maxSuggestions)
+        c.launcher.askClaude = la.bool("askClaude", c.launcher.askClaude)
+        c.launcher.askGrok = la.bool("askGrok", c.launcher.askGrok)
+        c.launcher.searchX = la.bool("searchX", c.launcher.searchX)
 
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
@@ -899,6 +923,21 @@ extension IslandConfig {
             "searchWindows": \(b(la.searchWindows)),
             // 2^10*3 같은 수식을 계산합니다. Return을 누르면 결과를 복사합니다.
             "calculator": \(b(la.calculator)),
+            // 100 USD to KRW, 100달러처럼 입력하면 ECB 기준 환율로 바꿉니다 (Frankfurter).
+            "currency": \(b(la.currency)),
+            // 홈 폴더의 파일을 Spotlight 색인에서 찾습니다.
+            "searchFiles": \(b(la.searchFiles)),
+            "maxFiles": \(n(la.maxFiles)),
+            // 시스템 설정 패널("wifi", "다크 모드")과 OmniIsland 설정을 찾습니다.
+            "searchSettings": \(b(la.searchSettings)),
+            // "Google에서 검색" 줄과 Google 추천 검색어입니다.
+            // 추천 검색어는 입력한 글자를 Google에 보냅니다 (주소처럼 보이는 입력은 보내지 않습니다).
+            "webSearch": \(b(la.webSearch)),
+            "suggestions": \(b(la.suggestions)),
+            "maxSuggestions": \(n(la.maxSuggestions)),
+            "askClaude": \(b(la.askClaude)),
+            "askGrok": \(b(la.askGrok)),
+            "searchX": \(b(la.searchX)),
             "width": \(n(la.width)),
           },
 
