@@ -330,6 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         launcher.onFocusWindow = { [weak self] window in
             self?.runWindowCommand(["window", "navigate", window.id], fallbackBundleId: window.bundleId)
         }
+        launcher.onOpenSettings = { [weak self] in self?.showSettings() }
         launcher.onSummonWindow = { [weak self] window in
             self?.runWindowCommand(["window", "summon-right", window.id], fallbackBundleId: window.bundleId)
         }

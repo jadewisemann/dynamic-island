@@ -48,7 +48,7 @@ struct LauncherView: View {
                 .foregroundStyle(palette.secondary)
             ZStack(alignment: .leading) {
                 if launcher.query.isEmpty {
-                    Text("앱이나 창을 검색합니다")
+                    Text("앱, 창, 파일, 설정을 검색하거나 웹에서 찾습니다")
                         .font(model.textFont(size: 15, weight: .regular))
                         .foregroundStyle(palette.secondary)
                         .allowsHitTesting(false)
@@ -114,10 +114,24 @@ private struct LauncherRow: View {
         case .window(let window):
             AppIconView(app: AppRef(name: window.appName, bundleId: window.bundleId), size: 26)
         case .calculation:
-            Image(systemName: "equal.square.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(model.palette.accent)
+            symbol("equal.square.fill")
+        case .currency:
+            symbol("dollarsign.circle.fill")
+        case .file(let file):
+            LauncherIcon(path: file.path)
+        case .pane:
+            LauncherIcon(path: SettingsPanes.appPath)
+        case .islandSettings:
+            symbol("capsule.fill")
+        case .web(_, let name):
+            symbol(name)
         }
+    }
+
+    private func symbol(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 19, weight: .medium))
+            .foregroundStyle(selected ? model.palette.activeText : model.palette.accent)
     }
 
     /// The title with the matched characters drawn bold.

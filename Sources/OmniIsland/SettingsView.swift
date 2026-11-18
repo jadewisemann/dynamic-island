@@ -1189,12 +1189,34 @@ private struct LauncherSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("계산기 (2^10*3 같은 수식)", isOn: $model.draft.launcher.calculator)
+                Toggle("환율 (100 USD to KRW, 100달러)", isOn: $model.draft.launcher.currency)
+                Toggle("시스템 설정 패널과 OmniIsland 설정", isOn: $model.draft.launcher.searchSettings)
+                Toggle("홈 폴더의 파일 (Spotlight)", isOn: $model.draft.launcher.searchFiles)
+                if model.draft.launcher.searchFiles {
+                    SliderRow(title: "파일 결과 수", value: $model.draft.launcher.maxFiles, range: 1...8, step: 1)
+                }
+            }
+            .disabled(!model.draft.launcher.enabled)
+
+            Section("웹") {
+                Toggle("Google에서 검색 줄", isOn: $model.draft.launcher.webSearch)
+                Toggle("Google 추천 검색어", isOn: $model.draft.launcher.suggestions)
+                    .disabled(!model.draft.launcher.webSearch)
+                if model.draft.launcher.webSearch && model.draft.launcher.suggestions {
+                    SliderRow(title: "추천 검색어 수", value: $model.draft.launcher.maxSuggestions, range: 1...6, step: 1)
+                    Text("추천 검색어를 받으려고 입력한 글자를 Google에 보냅니다. 점, 슬래시, @처럼 주소로 보이는 입력은 보내지 않습니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Claude에게 묻기", isOn: $model.draft.launcher.askClaude)
+                Toggle("Grok에게 묻기", isOn: $model.draft.launcher.askGrok)
+                Toggle("X에서 검색", isOn: $model.draft.launcher.searchX)
             }
             .disabled(!model.draft.launcher.enabled)
 
             Section("표시") {
                 SliderRow(title: "최대 결과 수", value: $model.draft.launcher.maxResults,
-                          range: 3...12, step: 1)
+                          range: 3...14, step: 1)
                 Toggle("검색어가 없을 때 최근에 연 앱 보여 주기", isOn: $model.draft.launcher.showRecent)
                 if model.draft.launcher.showRecent {
                     SliderRow(title: "최근 앱 개수", value: $model.draft.launcher.recentCount,
