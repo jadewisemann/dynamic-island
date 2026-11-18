@@ -131,7 +131,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `behavior.showEventsWithoutModifier` | `true` | 키를 누르지 않았을 때 일어난 이동도 펼쳐서 보여 줍니다. |
 | `behavior.eventDurationMs` | `1700` | 펼쳐진 상태가 유지되는 시간입니다. |
 | `behavior.showWorkspaceSwitch` / `showWindowMove` | `true` | 이벤트 종류별로 켜고 끕니다. |
-| `behavior.windowMoveTrail` | `true` | 창이 다른 워크스페이스로 옮겨지면 워크스페이스 줄에서 그 앱 아이콘을 실은 방울이 원래 워크스페이스에서 새 워크스페이스로 흘러갑니다. 줄이 보일 때(`layout.eventPlacement`가 `replace`가 아닐 때나 트리거 키를 누르고 있을 때) 나타납니다. |
+| `behavior.windowMoveTrail` | `true` | 창이 다른 워크스페이스로 옮겨지면 워크스페이스 줄에서 작은 방울이 원래 워크스페이스에서 새 워크스페이스로 흘러갑니다. 방울에는 아이콘을 따로 싣지 않아서 잔상이 남지 않습니다. 줄이 보일 때(`layout.eventPlacement`가 `replace`가 아닐 때나 트리거 키를 누르고 있을 때) 나타납니다. |
 | `behavior.showEmptyWorkspaces` | `false` | 창이 없는 워크스페이스도 목록에 보여 줍니다. |
 | `behavior.screen` | `"notch"` | `notch`(노치 있는 화면), `main`(메뉴 막대 화면), `active`(OmniWM이 조작 중인 모니터) 중 하나입니다. |
 | `behavior.hiddenStyle` | `"auto"` | `notch`는 숨었을 때 노치 크기의 검은 모양을 남기고, `fade`는 완전히 사라집니다. `auto`는 화면에 노치가 있는지 보고 고릅니다. |
