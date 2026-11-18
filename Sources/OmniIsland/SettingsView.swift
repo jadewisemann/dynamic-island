@@ -1,17 +1,35 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Draft config edited by the settings window. Every change is saved to
 /// config.json after a short pause and applied to the island right away.
 @MainActor
 final class SettingsModel: ObservableObject {
     @Published var draft: IslandConfig {
-        didSet { if !suppressSave { scheduleSave() } }
+        didSet {
+            preview.apply(config: draft)
+            syncPreviewLook()
+            if !suppressSave { scheduleSave() }
+        }
     }
     @Published var connectionStatus = ""
     @Published var accessibilityGranted = false
     @Published var configError: String?
+    /// Whether macOS is in dark mode right now.
+    @Published var systemIsDark = true {
+        didSet { if oldValue != systemIsDark { editingLight = !systemIsDark } }
+    }
+    /// With theme.mode = system: edit (and preview) the light colors.
+    @Published var editingLight = false {
+        didSet { syncPreviewLook() }
+    }
+    @Published var previewPhase: IslandPhase = .compact {
+        didSet { preview.showSample(previewPhase) }
+    }
     let configPath: String
+    /// A second island drawn inside the settings window.
+    let preview = IslandModel()
 
     var onSave: ((IslandConfig) -> IslandConfig)?
     var onPreview: (() -> Void)?
@@ -24,6 +42,12 @@ final class SettingsModel: ObservableObject {
     init(config: IslandConfig, configPath: String) {
         self.draft = config
         self.configPath = configPath
+        preview.isPreview = true
+        preview.geometry = NotchGeometry(width: 180, height: 32, hasNotch: true)
+        preview.loadSample()
+        preview.apply(config: config)
+        preview.showSample(.compact)
+        syncPreviewLook()
     }
 
     /// Applies a config that changed elsewhere (e.g. the file was edited).
@@ -53,6 +77,104 @@ final class SettingsModel: ObservableObject {
         }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    // MARK: Theme editing
+
+    var followsSystem: Bool { draft.theme.mode.lowercased() == "system" }
+
+    /// True when the theme tab edits the light colors.
+    var editsLight: Bool { followsSystem && editingLight }
+
+    /// The color set the theme tab edits: the light colors when following
+    /// the system and "light" is selected, otherwise the appearance colors.
+    var editedColors: IslandConfig.ThemeColors {
+        get { editsLight ? draft.theme.light : draft.appearance.colors }
+        set {
+            if editsLight { draft.theme.light = newValue } else { draft.appearance.colors = newValue }
+        }
+    }
+
+    private func syncPreviewLook() {
+        let light = editsLight
+        if preview.lookOverride != light { preview.lookOverride = light }
+    }
+
+    func apply(_ preset: ThemePreset) {
+        var next = draft
+        if editsLight { next.theme.light = preset.colors } else { next.appearance.colors = preset.colors }
+        if let design = preset.fontDesign {
+            next.appearance.fontDesign = design
+            next.appearance.fontFamily = ""
+        }
+        if let number = preset.numberFontDesign { next.appearance.numberFontDesign = number }
+        draft = next
+    }
+
+    func apply(_ saved: IslandConfig.SavedTheme) {
+        editedColors = saved.colors
+    }
+
+    func saveCurrentTheme(named name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var saved = draft.theme.saved.filter { $0.name != trimmed }
+        saved.append(IslandConfig.SavedTheme(name: trimmed, colors: editedColors))
+        draft.theme.saved = saved
+    }
+
+    func deleteSavedTheme(_ theme: IslandConfig.SavedTheme) {
+        draft.theme.saved.removeAll { $0.name == theme.name }
+    }
+
+    /// Writes the edited colors and fonts as a shareable .json file.
+    func exportTheme() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "omni-island-theme.json"
+        panel.message = "테마를 저장할 위치를 고르세요"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var dict = editedColors.dictionary
+        dict["name"] = url.deletingPathExtension().lastPathComponent
+        dict["fontFamily"] = draft.appearance.fontFamily
+        dict["fontDesign"] = draft.appearance.fontDesign
+        dict["numberFontDesign"] = draft.appearance.numberFontDesign
+        do {
+            let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            try data.write(to: url, options: .atomic)
+        } catch {
+            configError = "테마를 내보내지 못했습니다: \(error.localizedDescription)"
+        }
+    }
+
+    /// Reads a theme .json file into the edited colors and saves it to
+    /// "내 테마" under its name.
+    func importTheme() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.message = "가져올 테마 파일(.json)을 고르세요"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            guard let dict = try JSONSerialization.jsonObject(with: data, options: [.json5Allowed]) as? [String: Any] else {
+                configError = "테마 파일의 형식이 올바르지 않습니다."
+                return
+            }
+            var next = draft
+            let colors = IslandConfig.ThemeColors(dict: dict, base: IslandConfig.ThemeColors())
+            if editsLight { next.theme.light = colors } else { next.appearance.colors = colors }
+            if let v = dict["fontFamily"] as? String { next.appearance.fontFamily = v }
+            if let v = dict["fontDesign"] as? String { next.appearance.fontDesign = v }
+            if let v = dict["numberFontDesign"] as? String { next.appearance.numberFontDesign = v }
+            let name = (dict["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? url.deletingPathExtension().lastPathComponent
+            next.theme.saved.removeAll { $0.name == name }
+            next.theme.saved.append(IslandConfig.SavedTheme(name: name, colors: colors))
+            draft = next
+        } catch {
+            configError = "테마를 가져오지 못했습니다: \(error.localizedDescription)"
+        }
     }
 }
 
@@ -93,11 +215,18 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PreviewPane(model: model, island: model.preview)
+                .padding([.top, .horizontal], 12)
+
             TabView {
                 GeneralSettings(model: model)
                     .tabItem { Label("일반", systemImage: "gearshape") }
-                AppearanceSettings(model: model)
-                    .tabItem { Label("모양", systemImage: "paintpalette") }
+                ThemeSettings(model: model)
+                    .tabItem { Label("테마", systemImage: "paintpalette") }
+                LayoutSettings(model: model)
+                    .tabItem { Label("레이아웃", systemImage: "rectangle.3.group") }
+                WidgetSettings(model: model)
+                    .tabItem { Label("표시 요소", systemImage: "square.grid.2x2") }
                 AnimationSettings(model: model)
                     .tabItem { Label("애니메이션", systemImage: "wand.and.stars") }
                 ConnectionSettings(model: model)
@@ -111,7 +240,7 @@ struct SettingsView: View {
                     model.saveNow()
                     model.onPreview?()
                 } label: {
-                    Label("미리보기", systemImage: "play.fill")
+                    Label("실제 화면에서 미리보기", systemImage: "play.fill")
                 }
                 .keyboardShortcut("p", modifiers: .command)
                 Spacer()
@@ -120,7 +249,48 @@ struct SettingsView: View {
             }
             .padding(12)
         }
-        .frame(width: 560, height: 620)
+        .frame(width: 640, height: 820)
+    }
+}
+
+/// Live island drawn with the draft settings, above the tabs.
+private struct PreviewPane: View {
+    @ObservedObject var model: SettingsModel
+    @ObservedObject var island: IslandModel
+
+    var body: some View {
+        let light = model.editsLight || (!model.followsSystem && !IslandPalette(model.draft.appearance.colors).isDark)
+        ZStack(alignment: .top) {
+            LinearGradient(
+                colors: light ? [Color(hex: "#DCE4EE"), Color(hex: "#F3ECE2")] : [Color(hex: "#4F6596"), Color(hex: "#9B7C95")],
+                startPoint: .topLeading, endPoint: .bottomTrailing)
+            Rectangle()
+                .fill(Color.black.opacity(light ? 0.06 : 0.22))
+                .frame(height: island.geometry.height)
+            IslandView(model: island)
+        }
+        .frame(height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(alignment: .bottomLeading) {
+            if model.followsSystem {
+                Text(model.editingLight ? "밝은 모양" : "어두운 모양")
+                    .font(.caption)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(8)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Picker("", selection: $model.previewPhase) {
+                Text("숨김").tag(IslandPhase.hidden)
+                Text("워크스페이스").tag(IslandPhase.compact)
+                Text("이동 알림").tag(IslandPhase.expanded)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 260)
+            .padding(8)
+        }
     }
 }
 
@@ -175,8 +345,6 @@ private struct GeneralSettings: View {
                     Text("노치 모양 유지").tag("notch")
                     Text("완전히 사라짐").tag("fade")
                 }
-                Toggle("빈 워크스페이스도 표시", isOn: $model.draft.behavior.showEmptyWorkspaces)
-                Toggle("포커스된 앱 표시", isOn: $model.draft.appearance.showFocusedApp)
                 Toggle("메뉴 막대 아이콘 표시", isOn: $model.draft.behavior.showMenuBarIcon)
                 if !model.draft.behavior.showMenuBarIcon {
                     Text("아이콘을 숨기면 설정 창은 Finder에서 앱을 다시 열어야 나타납니다.")
@@ -195,34 +363,393 @@ private struct GeneralSettings: View {
     }
 }
 
-private struct AppearanceSettings: View {
+// MARK: - Theme tab
+
+private struct ThemeSettings: View {
+    @ObservedObject var model: SettingsModel
+    @State private var newThemeName = ""
+
+    private var fontFamilies: [String] { NSFontManager.shared.availableFontFamilies.sorted() }
+
+    var body: some View {
+        Form {
+            Section("모양 모드") {
+                Picker("색 구성", selection: $model.draft.theme.mode) {
+                    Text("항상 같은 테마").tag("fixed")
+                    Text("시스템 설정 따라가기").tag("system")
+                }
+                if model.followsSystem {
+                    Picker("편집할 모양", selection: $model.editingLight) {
+                        Text("어두울 때").tag(false)
+                        Text("밝을 때").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    Text("macOS가 다크 모드면 어두울 때의 테마를, 라이트 모드면 밝을 때의 테마를 씁니다. 아래 프리셋과 색은 지금 고른 쪽에 적용됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("기본 테마") {
+                PresetGrid(model: model, presets: ThemePreset.builtIn)
+            }
+
+            Section {
+                PresetGrid(model: model, presets: ThemePreset.community)
+            } header: {
+                Text("커뮤니티 테마")
+            } footer: {
+                Text("r/unixporn 등에서 많이 쓰는 색 구성을 각 테마의 공식 팔레트 값으로 옮겼습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("내 테마") {
+                if !model.draft.theme.saved.isEmpty {
+                    SavedThemeGrid(model: model)
+                }
+                HStack {
+                    TextField("이름", text: $newThemeName, prompt: Text("지금 색 구성을 저장할 이름"))
+                    Button("저장") {
+                        model.saveCurrentTheme(named: newThemeName)
+                        newThemeName = ""
+                    }
+                    .disabled(newThemeName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                HStack {
+                    Button("파일로 내보내기…") { model.exportTheme() }
+                    Button("파일에서 가져오기…") { model.importTheme() }
+                }
+            }
+
+            Section("배경") {
+                Picker("재질", selection: $model.editedColors.backgroundStyle) {
+                    Text("단색").tag("solid")
+                    Text("반투명").tag("material")
+                    Text("그라데이션").tag("gradient")
+                }
+                .pickerStyle(.segmented)
+                ColorRow(title: style == "gradient" ? "시작 색" : "배경색", hex: $model.editedColors.backgroundColor)
+                if style == "gradient" {
+                    ColorRow(title: "끝 색", hex: $model.editedColors.gradientColor)
+                    SliderRow(title: "방향", value: $model.editedColors.gradientAngle,
+                              range: 0...360, step: 5, unit: "°")
+                }
+                if style == "material" {
+                    Picker("두께", selection: $model.editedColors.material) {
+                        Text("얇게").tag("thin")
+                        Text("보통").tag("regular")
+                        Text("두껍게").tag("thick")
+                    }
+                    .pickerStyle(.segmented)
+                }
+                SliderRow(title: style == "material" ? "색 덧칠 강도" : "불투명도",
+                          value: $model.editedColors.backgroundOpacity,
+                          range: style == "material" ? 0...1 : 0.2...1, step: 0.05, decimals: 2)
+                SliderRow(title: "테두리 밝기", value: $model.editedColors.borderOpacity,
+                          range: 0...0.4, step: 0.02, decimals: 2)
+                Toggle("그림자", isOn: $model.editedColors.shadow)
+            }
+
+            Section("색") {
+                ColorRow(title: "강조색", hex: $model.editedColors.accentColor)
+                ColorRow(title: "글자", hex: $model.editedColors.textColor)
+                ColorRow(title: "보조 글자", hex: $model.editedColors.secondaryTextColor, supportsOpacity: true)
+                ColorRow(title: "활성 워크스페이스 글자", hex: $model.editedColors.activeTextColor)
+                ColorRow(title: "옅은 채움 (비활성 칸, 테두리)", hex: $model.editedColors.fillColor)
+                ColorRow(title: "알림 배지", hex: $model.editedColors.badgeColor)
+                ColorRow(title: "알림 배지 글자", hex: $model.editedColors.badgeTextColor)
+                LabeledContent("남은 시간 막대") {
+                    HStack {
+                        if !model.editedColors.progressColor.isEmpty {
+                            Button("강조색 사용") { model.editedColors.progressColor = "" }
+                                .buttonStyle(.link)
+                        }
+                        ColorPicker("", selection: progressBinding).labelsHidden()
+                    }
+                }
+                Picker("활성 워크스페이스 표시", selection: $model.editedColors.activeStyle) {
+                    Text("채움").tag("fill")
+                    Text("테두리").tag("outline")
+                    Text("밑줄").tag("underline")
+                    Text("점").tag("dot")
+                }
+                Toggle("활성 워크스페이스 빛 번짐", isOn: $model.editedColors.activeGlow)
+            }
+
+            Section("글꼴") {
+                Picker("글꼴", selection: fontChoice) {
+                    Text("시스템 기본").tag("design:default")
+                    Text("둥근 글꼴").tag("design:rounded")
+                    Text("고정폭").tag("design:monospaced")
+                    Text("세리프").tag("design:serif")
+                    Divider()
+                    ForEach(fontFamilies, id: \.self) { family in
+                        Text(family).tag("family:" + family)
+                    }
+                }
+                Picker("굵기", selection: $model.draft.appearance.fontWeight) {
+                    Text("가늘게").tag("light")
+                    Text("보통").tag("regular")
+                    Text("굵게").tag("bold")
+                    Text("아주 굵게").tag("heavy")
+                }
+                .pickerStyle(.segmented)
+                Picker("워크스페이스 번호 글꼴", selection: $model.draft.appearance.numberFontDesign) {
+                    Text("본문과 같게").tag("same")
+                    Text("시스템 기본").tag("default")
+                    Text("둥근 글꼴").tag("rounded")
+                    Text("고정폭").tag("monospaced")
+                    Text("세리프").tag("serif")
+                }
+                SliderRow(title: "글자 크기", value: $model.draft.appearance.fontSize,
+                          range: 10...18, step: 0.5, unit: "pt", decimals: 1)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var style: String { model.editedColors.backgroundStyle.lowercased() }
+
+    private var progressBinding: Binding<Color> {
+        Binding(
+            get: {
+                let c = model.editedColors
+                return Color(hex: c.progressColor.isEmpty ? c.accentColor : c.progressColor)
+            },
+            set: { model.editedColors.progressColor = $0.hexString(includeAlpha: false) }
+        )
+    }
+
+    /// One picker for both system designs and installed families.
+    private var fontChoice: Binding<String> {
+        Binding(
+            get: {
+                let a = model.draft.appearance
+                return a.fontFamily.isEmpty ? "design:" + a.fontDesign.lowercased() : "family:" + a.fontFamily
+            },
+            set: { value in
+                if value.hasPrefix("family:") {
+                    model.draft.appearance.fontFamily = String(value.dropFirst("family:".count))
+                } else {
+                    model.draft.appearance.fontFamily = ""
+                    model.draft.appearance.fontDesign = String(value.dropFirst("design:".count))
+                }
+            }
+        )
+    }
+}
+
+private struct PresetGrid: View {
+    @ObservedObject var model: SettingsModel
+    let presets: [ThemePreset]
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
+            ForEach(presets) { preset in
+                ThemeCard(name: preset.name, colors: preset.colors,
+                          selected: model.editedColors == preset.colors) {
+                    model.apply(preset)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct SavedThemeGrid: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
+            ForEach(model.draft.theme.saved) { theme in
+                ThemeCard(name: theme.name, colors: theme.colors,
+                          selected: model.editedColors == theme.colors) {
+                    model.apply(theme)
+                }
+                .contextMenu {
+                    Button("삭제", role: .destructive) { model.deleteSavedTheme(theme) }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// A small island-shaped swatch with the theme's name.
+private struct ThemeCard: View {
+    let name: String
+    let colors: IslandConfig.ThemeColors
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ThemeSwatch(colors: colors)
+                Text(name)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(selected ? 0.08 : 0)))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .stroke(selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 2 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ThemeSwatch: View {
+    let colors: IslandConfig.ThemeColors
+
+    var body: some View {
+        let p = IslandPalette(colors)
+        ZStack {
+            switch colors.backgroundStyle.lowercased() {
+            case "gradient":
+                IslandBackground.gradient(p)
+            case "material":
+                ZStack {
+                    LinearGradient(colors: [Color(hex: "#6F86B8"), Color(hex: "#C7A7B9")],
+                                   startPoint: .leading, endPoint: .trailing)
+                    p.background.opacity(max(colors.backgroundOpacity, 0.45))
+                }
+            default:
+                p.background
+            }
+            HStack(spacing: 4) {
+                Capsule().fill(p.fill.opacity(0.16)).frame(width: 14, height: 10)
+                Capsule().fill(p.accent).frame(width: 20, height: 10)
+                Capsule().fill(p.fill.opacity(0.16)).frame(width: 14, height: 10)
+            }
+        }
+        .frame(height: 30)
+        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 10, bottomTrailingRadius: 10, style: .continuous))
+        .overlay(UnevenRoundedRectangle(bottomLeadingRadius: 10, bottomTrailingRadius: 10, style: .continuous)
+            .stroke(Color.primary.opacity(0.1), lineWidth: 1))
+    }
+}
+
+// MARK: - Layout tab
+
+private struct LayoutSettings: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
         Form {
-            Section("색상") {
-                ColorRow(title: "배경", hex: $model.draft.appearance.backgroundColor)
-                SliderRow(title: "배경 불투명도", value: $model.draft.appearance.backgroundOpacity,
-                          range: 0.2...1, step: 0.05, decimals: 2)
-                ColorRow(title: "강조색", hex: $model.draft.appearance.accentColor)
-                ColorRow(title: "글자", hex: $model.draft.appearance.textColor)
-                ColorRow(title: "보조 글자", hex: $model.draft.appearance.secondaryTextColor, supportsOpacity: true)
-                SliderRow(title: "테두리 밝기", value: $model.draft.appearance.borderOpacity,
-                          range: 0...0.4, step: 0.02, decimals: 2)
-                Toggle("그림자", isOn: $model.draft.appearance.shadow)
+            Section("형태와 위치") {
+                Picker("형태", selection: $model.draft.layout.shape) {
+                    Text("노치에 붙음").tag("attached")
+                    Text("떠 있는 캡슐").tag("floating")
+                }
+                .pickerStyle(.segmented)
+                if floating {
+                    SliderRow(title: "메뉴 막대와의 간격", value: $model.draft.layout.topGap,
+                              range: 0...40, step: 1, unit: "pt")
+                }
+                Picker("가로 위치", selection: $model.draft.layout.horizontalPosition) {
+                    Text("가운데").tag("center")
+                    Text("왼쪽").tag("left")
+                    Text("오른쪽").tag("right")
+                }
+                .pickerStyle(.segmented)
+                SliderRow(title: "가로 위치 미세 조정", value: $model.draft.layout.horizontalOffset,
+                          range: -400...400, step: 5, unit: "pt")
+                Text("노치가 있는 화면에서는 아일랜드가 항상 노치 가운데에 붙으므로 가로 위치를 쓰지 않습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            Section("모양") {
-                SliderRow(title: "아래쪽 모서리 반경", value: $model.draft.appearance.bottomCornerRadius,
-                          range: 0...32, step: 1, unit: "pt")
-                SliderRow(title: "위쪽 어깨 반경", value: $model.draft.appearance.topCornerRadius,
-                          range: 0...16, step: 1, unit: "pt")
-                SliderRow(title: "펼쳤을 때 너비", value: $model.draft.appearance.expandedWidth,
-                          range: 260...700, step: 10, unit: "pt")
+            Section("크기") {
+                Picker("너비", selection: $model.draft.layout.widthMode) {
+                    Text("내용에 맞춤").tag("auto")
+                    Text("고정 너비").tag("fixed")
+                }
+                .pickerStyle(.segmented)
+                if model.draft.layout.widthMode.lowercased() == "fixed" {
+                    SliderRow(title: "고정 너비", value: $model.draft.layout.fixedWidth,
+                              range: 200...900, step: 10, unit: "pt")
+                }
+                SliderRow(title: "펼쳤을 때 최소 너비", value: $model.draft.appearance.expandedWidth,
+                          range: 260...800, step: 10, unit: "pt")
                 SliderRow(title: "워크스페이스 줄 높이", value: $model.draft.appearance.compactRowHeight,
-                          range: 28...60, step: 1, unit: "pt")
+                          range: 24...64, step: 1, unit: "pt")
                 SliderRow(title: "알림 줄 높이", value: $model.draft.appearance.expandedHeaderHeight,
-                          range: 40...90, step: 1, unit: "pt")
+                          range: 36...96, step: 1, unit: "pt")
+                SliderRow(title: "안쪽 여백", value: $model.draft.layout.contentPadding,
+                          range: 4...40, step: 1, unit: "pt")
+            }
+
+            Section("모서리") {
+                SliderRow(title: floating ? "모서리 반경" : "아래쪽 모서리 반경",
+                          value: $model.draft.appearance.bottomCornerRadius,
+                          range: 0...40, step: 1, unit: "pt")
+                if !floating {
+                    SliderRow(title: "위쪽 어깨 반경", value: $model.draft.appearance.topCornerRadius,
+                              range: 0...16, step: 1, unit: "pt")
+                }
+            }
+
+            Section("워크스페이스 줄") {
+                Picker("정렬", selection: $model.draft.layout.rowAlignment) {
+                    Text("가운데").tag("center")
+                    Text("왼쪽").tag("leading")
+                    Text("양쪽 맞춤").tag("spread")
+                }
+                .pickerStyle(.segmented)
+                SliderRow(title: "워크스페이스 알약 크기", value: $model.draft.appearance.pillSize,
+                          range: 18...36, step: 1, unit: "pt")
+                SliderRow(title: "워크스페이스 간격", value: $model.draft.appearance.pillSpacing,
+                          range: 2...16, step: 1, unit: "pt")
+            }
+
+            Section("이동 알림") {
+                Picker("알림 줄 위치", selection: $model.draft.layout.eventPlacement) {
+                    Text("워크스페이스 줄 아래").tag("below")
+                    Text("워크스페이스 줄 위").tag("above")
+                    Text("워크스페이스 줄 대신").tag("replace")
+                }
+            }
+
+            Section("노치가 없는 화면") {
+                SliderRow(title: "가상 노치 너비", value: $model.draft.appearance.fallbackNotchWidth,
+                          range: 100...320, step: 5, unit: "pt")
+                SliderRow(title: "가상 노치 높이", value: $model.draft.appearance.fallbackNotchHeight,
+                          range: 20...44, step: 1, unit: "pt")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var floating: Bool { model.draft.layout.shape.lowercased() == "floating" }
+}
+
+// MARK: - Widgets tab
+
+private struct WidgetSettings: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Form {
+            Section {
+                wingPicker("왼쪽", selection: $model.draft.widgets.leftWing)
+                wingPicker("오른쪽", selection: $model.draft.widgets.rightWing)
+                if usesClock {
+                    Picker("시계 형식", selection: $model.draft.widgets.clockFormat) {
+                        Text("24시간").tag("24h")
+                        Text("12시간").tag("12h")
+                        Text("24시간, 초 표시").tag("24hSeconds")
+                    }
+                }
+            } header: {
+                Text("노치 양옆")
+            } footer: {
+                Text("떠 있는 캡슐 형태에서는 워크스페이스 줄의 양 끝에 표시됩니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("워크스페이스 줄") {
@@ -231,6 +758,12 @@ private struct AppearanceSettings: View {
                     Text("번호만").tag("pills")
                 }
                 .pickerStyle(.segmented)
+                Picker("워크스페이스 이름", selection: $model.draft.widgets.workspaceLabel) {
+                    Text("OmniWM 표시 이름").tag("name")
+                    Text("번호만").tag("number")
+                    Text("번호와 이름").tag("both")
+                }
+                Toggle("빈 워크스페이스도 표시", isOn: $model.draft.behavior.showEmptyWorkspaces)
                 if model.draft.appearance.workspaceStyle != "pills" {
                     SliderRow(title: "앱 아이콘 크기", value: $model.draft.appearance.appIconSize,
                               range: 14...32, step: 1, unit: "pt")
@@ -253,27 +786,37 @@ private struct AppearanceSettings: View {
                 }
             }
 
-            Section("내용") {
-                SliderRow(title: "글자 크기", value: $model.draft.appearance.fontSize,
-                          range: 10...18, step: 0.5, unit: "pt", decimals: 1)
-                SliderRow(title: "워크스페이스 알약 크기", value: $model.draft.appearance.pillSize,
-                          range: 18...36, step: 1, unit: "pt")
-                SliderRow(title: "알약 간격", value: $model.draft.appearance.pillSpacing,
-                          range: 2...16, step: 1, unit: "pt")
-                Toggle("앱 아이콘 표시", isOn: $model.draft.appearance.showAppIcons)
-                Toggle("남은 시간 막대 표시", isOn: $model.draft.appearance.showEventProgress)
-            }
-
-            Section("노치가 없는 화면") {
-                SliderRow(title: "가상 노치 너비", value: $model.draft.appearance.fallbackNotchWidth,
-                          range: 100...320, step: 5, unit: "pt")
-                SliderRow(title: "가상 노치 높이", value: $model.draft.appearance.fallbackNotchHeight,
-                          range: 20...44, step: 1, unit: "pt")
+            Section("이동 알림 카드") {
+                Toggle("아이콘", isOn: $model.draft.widgets.eventIcon)
+                if model.draft.widgets.eventIcon {
+                    Toggle("창을 옮길 때 앱 아이콘 사용", isOn: $model.draft.appearance.showAppIcons)
+                }
+                Toggle("부제목 (창 제목, 포커스된 앱)", isOn: $model.draft.widgets.eventSubtitle)
+                Toggle("출발 → 도착 워크스페이스", isOn: $model.draft.widgets.eventFromTo)
+                Toggle("남은 시간 막대", isOn: $model.draft.appearance.showEventProgress)
             }
         }
         .formStyle(.grouped)
     }
+
+    private var usesClock: Bool {
+        let w = model.draft.widgets
+        return w.leftWing.lowercased() == "clock" || w.rightWing.lowercased() == "clock"
+    }
+
+    private func wingPicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            Text("포커스된 앱").tag("app")
+            Text("활성 워크스페이스").tag("workspace")
+            Text("시계").tag("clock")
+            Text("날짜").tag("date")
+            Text("창 개수").tag("windows")
+            Text("없음").tag("none")
+        }
+    }
 }
+
+// MARK: - Animation tab
 
 private struct AnimationSettings: View {
     @ObservedObject var model: SettingsModel
@@ -290,15 +833,24 @@ private struct AnimationSettings: View {
                     Text("애니메이션 없음").tag("none")
                 }
                 timingRows
+                if style != "none" {
+                    SliderRow(title: "전체 속도", value: $model.draft.motion.speed,
+                              range: 0.5...2, step: 0.05, unit: "×", decimals: 2)
+                }
             }
 
             Section("효과") {
-                Toggle("나타날 때 블러 효과", isOn: $model.draft.motion.blurTransitions)
+                Picker("내용 전환", selection: $model.draft.motion.contentTransition) {
+                    Text("블러와 페이드").tag("blur")
+                    Text("페이드만").tag("fade")
+                    Text("아래에서 밀려 올라옴").tag("slide")
+                    Text("없음").tag("none")
+                }
                 Toggle("이벤트가 들어올 때 살짝 튀어오르기", isOn: $model.draft.motion.popOnEvent)
             }
 
             Section {
-                Text("값을 바꾸면 바로 적용됩니다. 아래쪽의 미리보기 버튼(⌘P)으로 확인해 보세요.")
+                Text("값을 바꾸면 위쪽 미리보기에 바로 반영됩니다. 실제 화면에서 보려면 아래쪽 버튼(⌘P)을 누르세요.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 @main
 struct OmniIslandMain {
@@ -32,10 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsController: SettingsWindowController?
 
     private let isDemo = CommandLine.arguments.contains("--demo")
+    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configStore.start()
         model.apply(config: configStore.config)
+        observeSystemAppearance()
         installMainMenu()
         setUpSettings()
 
@@ -96,6 +99,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         client.stop()
+    }
+
+    // MARK: - System appearance
+
+    /// Keeps `model.systemIsDark` in step with macOS dark mode, for
+    /// theme.mode = system.
+    private func observeSystemAppearance() {
+        updateSystemAppearance()
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.updateSystemAppearance() }
+            }
+        }
+        _ = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            // effectiveAppearance updates a moment after the notification.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                MainActor.assumeIsolated { self?.updateSystemAppearance() }
+            }
+        }
+    }
+
+    private func updateSystemAppearance() {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        if model.systemIsDark != dark {
+            withAnimation(model.swiftUIAnimation) { model.systemIsDark = dark }
+        }
+        settingsModel?.systemIsDark = dark
     }
 
     // MARK: - Config
@@ -192,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setUpSettings() {
         let settings = SettingsModel(config: configStore.config, configPath: configStore.fileURL.path)
+        settings.systemIsDark = model.systemIsDark
         settings.onSave = { [weak self] config in
             guard let self else { return config }
             let normalized = self.configStore.save(config)

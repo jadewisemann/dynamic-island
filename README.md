@@ -92,7 +92,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 
 ## 설정
 
-메뉴 막대의 캡슐 아이콘 → **설정…**(⌘,)을 누르면 설정 창이 열립니다. 일반, 모양, 애니메이션, 연결 탭에서 값을 바꾸면 바로 아일랜드에 반영되고 설정 파일에도 저장되므로, 파일을 직접 고칠 필요는 없습니다. 처음 실행할 때와, 메뉴 막대 아이콘을 숨긴 상태에서 앱을 다시 열 때에도 설정 창이 나타납니다.
+메뉴 막대의 캡슐 아이콘 → **설정…**(⌘,)을 누르면 설정 창이 열립니다. 일반, 테마, 레이아웃, 표시 요소, 애니메이션, 연결 탭에서 값을 바꾸면 창 위쪽의 미리보기와 실제 아일랜드에 바로 반영되고 설정 파일에도 저장되므로, 파일을 직접 고칠 필요는 없습니다. 처음 실행할 때와, 메뉴 막대 아이콘을 숨긴 상태에서 앱을 다시 열 때에도 설정 창이 나타납니다.
 
 설정 창이 저장하는 파일은 `~/.config/omni-island/config.json`입니다. 처음 실행할 때 주석이 달린 기본 파일이 만들어지고, 메뉴 막대 아이콘 → "설정 파일 열기"로 바로 열 수 있습니다. JSON5 형식이라 `//` 주석과 끝 쉼표를 쓸 수 있으며, 적지 않은 항목은 기본값을 사용합니다.
 
@@ -111,19 +111,37 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `behavior.screen` | `"notch"` | `notch`(노치 있는 화면), `main`(메뉴 막대 화면), `active`(OmniWM이 조작 중인 모니터) 중 하나입니다. |
 | `behavior.hiddenStyle` | `"auto"` | `notch`는 숨었을 때 노치 크기의 검은 모양을 남기고, `fade`는 완전히 사라집니다. `auto`는 화면에 노치가 있는지 보고 고릅니다. |
 | `behavior.coalesceMs` | `140` | 이 시간 안에 겹친 이벤트를 하나로 합칩니다. |
-| `appearance.borderOpacity` | `0` | 가장자리에 그리는 얇은 밝은 테두리의 불투명도입니다. |
 | `appearance.showEventProgress` | `true` | 펼쳐진 상태가 끝날 때까지 남은 시간을 아래쪽 막대로 보여 줍니다. |
 | `appearance.workspaceStyle` | `"apps"` | `apps`는 워크스페이스 번호 옆에 그 워크스페이스의 앱 아이콘을 나열하고(OmniWM 워크스페이스 바와 비슷합니다), `pills`는 번호만 보여 줍니다. |
 | `appearance.appIconSize` / `maxAppsPerWorkspace` | `20` / `6` | 앱 아이콘 크기와 워크스페이스마다 보여 줄 최대 아이콘 수입니다. 넘치는 앱은 `+N`으로 묶습니다. |
 | `appearance.showBadges` | `true` | Dock 아이콘의 빨간 알림 배지를 앱 아이콘에도 표시합니다. 손쉬운 사용 권한이 필요하며, `behavior.badgeIntervalMs`(기본 3000) 간격으로 다시 읽습니다. |
 | `appearance.highlightFocusedWindow` | `true` | 지금 포커스된 창의 앱 아이콘을 강조색 테두리로 감싸서 표시합니다. 포커스가 옮겨지면 테두리도 따라 이동합니다. |
 | `appearance.multiWindowStyle` | `"dots"` | 한 워크스페이스에 창이 여러 개 있는 앱을 보여 주는 방식입니다. `merge`는 아이콘 하나로 합치고, `dots`는 아이콘 아래에 창 개수만큼 점(최대 3개)을 찍고, `separate`는 창마다 아이콘을 따로 표시합니다. |
-| `appearance.*` | | 배경색과 불투명도, 강조색, 글자색, 모서리 반경, 글자 크기, 알약 크기, 그림자, 펼친 너비와 높이, 앱 아이콘 표시 여부입니다. 색상은 `#RRGGBB` 또는 `#RRGGBBAA`로 적습니다. |
+| `appearance.backgroundStyle` | `"solid"` | `solid`(단색), `material`(macOS 반투명 재질), `gradient`(`backgroundColor`에서 `gradientColor`로, `gradientAngle` 방향) 중 하나입니다. 반투명 재질의 두께는 `material`(`thin`, `regular`, `thick`)로 정합니다. |
+| `appearance.activeTextColor` / `fillColor` | `"#FFFFFF"` | 활성 워크스페이스 위의 글자 색과, 비활성 칸·창 개수 점·테두리에 옅게 쓰는 기본 색입니다. 밝은 테마에서는 `fillColor`를 검정으로 둡니다. |
+| `appearance.badgeColor` / `badgeTextColor` / `progressColor` | | 알림 배지와 남은 시간 막대의 색입니다. `progressColor`를 비워 두면 강조색을 씁니다. |
+| `appearance.activeStyle` / `activeGlow` | `"fill"` / `true` | 활성 워크스페이스 표시 방식(`fill`, `outline`, `underline`, `dot`)과 빛 번짐 여부입니다. |
+| `appearance.fontFamily` / `fontDesign` / `fontWeight` / `numberFontDesign` | `""` / `"default"` / `"regular"` / `"rounded"` | 설치된 글꼴 이름(비우면 시스템 글꼴), 시스템 글꼴 모양(`default`, `rounded`, `monospaced`, `serif`), 전체 굵기(`light`, `regular`, `bold`, `heavy`), 워크스페이스 번호 글꼴(`same`이면 본문과 같음)입니다. |
+| `appearance.*` | | 그 밖에 배경색과 불투명도, 강조색, 글자색, 테두리, 그림자, 모서리 반경, 글자 크기, 알약 크기, 펼친 너비와 높이가 있습니다. 색상은 `#RRGGBB` 또는 `#RRGGBBAA`로 적습니다. |
+| `theme.mode` | `"fixed"` | `system`이면 macOS가 다크 모드일 때 `appearance`의 색을, 라이트 모드일 때 `theme.light`의 색을 씁니다. `theme.light`에는 `appearance`와 같은 색 키를 적습니다. |
+| `theme.saved` | `[]` | 설정 창에서 "내 테마"로 저장한 테마 목록입니다. |
+| `layout.shape` | `"attached"` | `attached`는 노치에서 자라나고, `floating`은 메뉴 막대 아래 `layout.topGap`만큼 떨어진 캡슐로 나타납니다. |
+| `layout.horizontalPosition` / `horizontalOffset` | `"center"` / `0` | 노치가 없는 화면에서 가로 위치(`center`, `left`, `right`)와 미세 조정 값입니다. |
+| `layout.widthMode` / `fixedWidth` | `"auto"` / `420` | `fixed`이면 아일랜드가 적어도 `fixedWidth`만큼 넓어집니다. |
+| `layout.rowAlignment` / `contentPadding` | `"center"` / `20` | 워크스페이스 줄 정렬(`center`, `leading`, `spread`)과 안쪽 여백입니다. |
+| `layout.eventPlacement` | `"below"` | 이동 알림을 워크스페이스 줄 아래(`below`), 위(`above`), 또는 줄 대신(`replace`) 보여 줍니다. |
+| `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `none` 중 하나입니다. |
+| `widgets.workspaceLabel` | `"name"` | 워크스페이스를 OmniWM 표시 이름(`name`), 번호(`number`), 번호와 이름(`both`)으로 보여 줍니다. |
+| `widgets.eventIcon` / `eventSubtitle` / `eventFromTo` | `true` | 이동 알림 카드의 아이콘, 부제목, "출발 → 도착" 표시를 켜고 끕니다. |
+| `widgets.clockFormat` | `"24h"` | `24h`, `12h`, `24hSeconds` 중 하나입니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
 | `animation.durationMs` | `380` | `spring`이 아닌 스타일의 재생 시간입니다. |
-| `animation.blurTransitions` | `true` | 내용이 나타나고 사라질 때 블러를 함께 적용합니다. |
+| `animation.speed` | `1` | 모든 움직임의 속도 배율입니다. |
+| `animation.contentTransition` | `"blur"` | 내용이 나타나는 방식입니다. `blur`, `fade`, `slide`, `none` 중 하나입니다. (예전의 `blurTransitions: false`는 `fade`로 읽습니다.) |
 | `animation.popOnEvent` | `true` | 이벤트가 들어올 때 살짝 커졌다가 돌아오는 효과입니다. |
+
+설정 창의 테마 탭에는 기본 테마 6가지와, r/unixporn 등에서 많이 쓰는 커뮤니티 테마(Catppuccin Mocha·Latte, Nord, Gruvbox, Tokyo Night, Rosé Pine·Dawn, Dracula, Everforest, Kanagawa)가 프리셋으로 들어 있습니다. 지금 색 구성을 "내 테마"로 저장하거나 `.json` 파일로 내보내고 가져올 수도 있습니다.
 
 예를 들어 더 통통 튀는 느낌을 원하면 다음처럼 적습니다.
 
