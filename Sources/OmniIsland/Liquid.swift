@@ -249,7 +249,9 @@ private struct LiquidTrail {
 
 /// Liquid layer behind the workspace row: the active workspace highlight
 /// (fill style) that stretches from one workspace to the next, and a drop
-/// that carries a moved window to its new workspace.
+/// that flows from a moved window's old workspace to its new one. The drop
+/// carries no app icon: the row already moves the real icon, and a second
+/// copy in flight read as a ghost of it.
 struct RowLiquid: View {
     @ObservedObject var model: IslandModel
     let frames: [String: CGRect]
@@ -344,14 +346,7 @@ struct RowLiquid: View {
                 Canvas { ctx, _ in
                     Self.draw(dropTrail, radius: nil, color: accent, settled: false, in: &ctx)
                 }
-                .opacity(0.55 * fade)
-                if let app = drop.app, model.usesAppStyle, model.config.appearance.showAppIcons {
-                    let size = CGFloat(model.config.appearance.appIconSize)
-                    AppIconView(app: app, size: size)
-                        .frame(width: size, height: size)
-                        .position(x: dropTrail.head.midX, y: dropTrail.head.midY)
-                        .opacity(fade)
-                }
+                .opacity(0.4 * fade)
             }
         }
     }
@@ -359,7 +354,7 @@ struct RowLiquid: View {
     /// The drop fades as it lands.
     private func dropFade(_ trail: LiquidTrail, drop: Drop, now: Date) -> Double {
         let t = now.timeIntervalSince(drop.start) * speed
-        return t < 0.7 ? 1 : max(0, 1 - (t - 0.7) / 0.5)
+        return t < 0.45 ? 1 : max(0, 1 - (t - 0.45) / 0.25)
     }
 
     /// A round drop about the size of an app icon, centered on a workspace.
