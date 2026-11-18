@@ -20,6 +20,8 @@ cask "omni-island@nightly" do
   depends_on macos: ">= :sonoma"
 
   app "OmniIsland.app"
+  # The app's executable doubles as the `omni-island` command (notify, hook).
+  binary "#{appdir}/OmniIsland.app/Contents/MacOS/OmniIsland", target: "omni-island"
 
   # Same as the stable cask: the app is self-signed, not notarized.
   postflight do

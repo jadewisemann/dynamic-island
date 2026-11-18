@@ -64,6 +64,8 @@ final class IslandModel: ObservableObject {
     @Published private(set) var missedNotifications: [IslandNotification] = []
     /// Most recent first, for the dashboard.
     @Published private(set) var recentNotifications: [IslandNotification] = []
+    /// Coding agent sessions reported through hooks, most recent first.
+    @Published private(set) var agentSessions: [AgentSession] = []
     /// Today's and tomorrow's calendar events, sorted by start.
     @Published private(set) var calendarEvents: [CalendarEvent] = []
     /// Whether macOS currently uses dark mode (for theme.mode = system).
@@ -88,6 +90,10 @@ final class IslandModel: ObservableObject {
     var onFocusWorkspace: ((WorkspaceItem) -> Void)?
     /// Clicked a notification card or a row of the notification history.
     var onOpenNotification: ((IslandNotification) -> Void)?
+    /// Pressed a button on a notification card.
+    var onNotificationAction: ((IslandNotification, NotificationAction) -> Void)?
+    /// Clicked an agent session in a wing or tile.
+    var onOpenAgent: ((AgentSession) -> Void)?
     /// The notification history changed (for the menu bar list).
     var onRecentChange: (() -> Void)?
     private var showWork: DispatchWorkItem?
@@ -303,6 +309,42 @@ final class IslandModel: ObservableObject {
 
     static let recentLimit = 30
 
+    /// A button on the card: runs it, then moves on like a click.
+    func perform(_ action: NotificationAction, on n: IslandNotification) {
+        guard acceptsClicks else { return }
+        onNotificationAction?(n, action)
+        missedNotifications.removeAll { $0.id == n.id }
+        if phase == .notification && notification?.id == n.id {
+            notificationWork?.cancel()
+            pointerInside = false
+            if !showNextNotification() { setPhase(.hidden) }
+        }
+    }
+
+    // MARK: - Agents and external cards
+
+    func setAgentSessions(_ sessions: [AgentSession]) {
+        guard sessions != agentSessions else { return }
+        animate { self.agentSessions = sessions }
+    }
+
+    func openAgent(_ session: AgentSession) {
+        guard acceptsClicks else { return }
+        onOpenAgent?(session)
+        closeAfterClick()
+    }
+
+    /// Removes the card with this sender id, on screen or waiting.
+    func dismiss(externalId: String) {
+        animate {
+            self.notificationQueue.removeAll { $0.externalId == externalId }
+            self.missedNotifications.removeAll { $0.externalId == externalId }
+        }
+        guard phase == .notification, notification?.externalId == externalId else { return }
+        notificationWork?.cancel()
+        if !showNextNotification() { setPhase(.hidden) }
+    }
+
     func clearRecent() {
         animate {
             self.recentNotifications = []
@@ -381,6 +423,7 @@ final class IslandModel: ObservableObject {
     /// Whether a notification passes the app filter in the settings.
     func allows(_ n: IslandNotification) -> Bool {
         let c = config.notifications
+        if n.source == .agent || n.source == .external { return true }
         guard c.enabled || n.source == .calendar else { return false }
         let names = Set(c.apps.map { $0.lowercased() })
         let matches = names.contains(n.appName.lowercased()) || names.contains(n.bundleId?.lowercased() ?? "\u{0}")
@@ -399,6 +442,19 @@ final class IslandModel: ObservableObject {
             recentNotifications.removeLast(recentNotifications.count - Self.recentLimit)
         }
         onRecentChange?()
+
+        // Same sender id: replace the card in place (progress updates).
+        if let id = n.externalId {
+            if phase == .notification, notification?.externalId == id {
+                animate { self.notification = n }
+                scheduleNotificationEnd()
+                return
+            }
+            if let index = notificationQueue.firstIndex(where: { $0.externalId == id }) {
+                animate { self.notificationQueue[index] = n }
+                return
+            }
+        }
 
         // Same app again while its card is up: replace the card's content.
         if phase == .notification, let current = notification, current.groupKey == n.groupKey,
@@ -475,7 +531,7 @@ final class IslandModel: ObservableObject {
 
     private func scheduleNotificationEnd() {
         notificationWork?.cancel()
-        notificationWork = after(ms: config.notifications.durationMs) { [weak self] in
+        notificationWork = after(ms: notification?.durationMs ?? config.notifications.durationMs) { [weak self] in
             guard let self, self.phase == .notification else { return }
             if let n = self.notification { self.addMissed(n) }
             if !self.showNextNotification() {

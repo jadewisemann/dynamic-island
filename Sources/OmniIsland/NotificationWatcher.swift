@@ -7,6 +7,10 @@ struct IslandNotification: Identifiable, Equatable {
     enum Source: Equatable {
         case system
         case calendar
+        /// A coding agent (Claude Code, Codex) reporting through its hooks.
+        case agent
+        /// Sent by `omni-island notify` or another local client.
+        case external
     }
 
     let id = UUID()
@@ -19,9 +23,34 @@ struct IslandNotification: Identifiable, Equatable {
     var date = Date()
     /// Extra text shown on the right of the title (e.g. "14:00–14:30").
     var detail: String?
+    /// SF Symbol drawn instead of the app icon.
+    var symbol: String? = nil
+    /// Color of `symbol`, `#RRGGBB`.
+    var tint: String? = nil
+    /// Buttons on the card (e.g. allow / deny for an agent).
+    var actions: [NotificationAction] = []
+    /// Overrides notifications.durationMs for this card.
+    var durationMs: Double? = nil
+    /// OmniWM window to focus when the card is clicked.
+    var windowId: String? = nil
+    /// Id chosen by the sender: a newer card with the same id replaces this
+    /// one, and `omni-island dismiss` removes it.
+    var externalId: String? = nil
+    /// Overrides the merge key (one agent session per card).
+    var group: String? = nil
+    /// Opaque value for whoever handles the card's actions.
+    var payload: String? = nil
 
     /// Used to merge repeated banners from the same app.
-    var groupKey: String { (bundleId ?? appName).lowercased() }
+    var groupKey: String { group ?? (bundleId ?? appName).lowercased() }
+}
+
+/// A button on a notification card.
+struct NotificationAction: Identifiable, Equatable {
+    enum Role: Equatable { case primary, destructive, normal }
+    let id: String
+    let label: String
+    var role: Role = .normal
 }
 
 /// What was read from one banner element in Notification Center.

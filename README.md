@@ -154,7 +154,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `layout.widthMode` / `fixedWidth` | `"auto"` / `420` | `fixed`이면 아일랜드가 적어도 `fixedWidth`만큼 넓어집니다. |
 | `layout.rowAlignment` / `contentPadding` | `"center"` / `20` | 워크스페이스 줄 정렬(`center`, `leading`, `spread`)과 안쪽 여백입니다. |
 | `layout.eventPlacement` | `"below"` | 이동 알림을 워크스페이스 줄 아래(`below`), 위(`above`), 또는 줄 대신(`replace`) 보여 줍니다. |
-| `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `nextEvent`(다음 일정), `notifications`(놓친 알림 수), `none` 중 하나입니다. |
+| `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `nextEvent`(다음 일정), `notifications`(놓친 알림 수), `agents`(코딩 에이전트), `none` 중 하나입니다. |
 | `widgets.leftPanel` / `rightPanel` | `["clock"]` / `["calendar"]` | 워크스페이스 줄이 보일 때 아일랜드 양옆에 붙는 정사각형 위젯 칸입니다. `clock`, `calendar`, `nextEvent`, `events`, `notifications`를 순서대로 적고, 비우면 그쪽 칸이 없습니다. |
 | `widgets.panelUnits` | `1` | 한쪽 칸의 너비를 정사각형 1~3칸으로 정합니다. 2칸 이상이면 위젯이 넓은 모양(큰 시계, 2주 달력, 일정 목록)으로 바뀝니다. |
 | `widgets.workspaceLabel` | `"name"` | 워크스페이스를 OmniWM 표시 이름(`name`), 번호(`number`), 번호와 이름(`both`)으로 보여 줍니다. |
@@ -231,6 +231,39 @@ macOS에는 다른 앱의 알림을 읽는 공식 API가 없어서, 두 가지 �
 처음 실행하거나 필요한 권한이 빠져 있으면 "OmniIsland 권한 설정" 창이 열립니다. 손쉬운 사용(필수), 전체 디스크 접근(알림 데이터베이스용), 캘린더를 한 단계씩 안내하고, 각 단계에서 해당 시스템 설정 화면을 바로 엽니다. 권한이 켜지면 자동으로 다음 단계로 넘어갑니다. macOS는 전체 디스크 접근 권한을 앱이 직접 요청할 수 없으므로, 이 단계에서는 목록에서 OmniIsland를 켜거나 "Finder에서 앱 보기"로 연 앱을 목록으로 끌어다 놓아야 합니다. 건너뛴 선택 권한은 다음 실행 때 다시 묻지 않으며, 메뉴 막대 아이콘의 "권한 설정…"에서 언제든 다시 열 수 있습니다.
 
 일정은 EventKit으로 읽습니다. 설정 창의 "알림·일정" 탭에서 캘린더를 켜면 macOS가 캘린더 접근 권한을 묻습니다. 노치 양옆 위젯을 "다음 일정"으로 바꾸면 다음 일정과 남은 시간이 보이고, 일정이 시작되기 전에는 알림 카드가 펼쳐집니다.
+
+## 코딩 에이전트와 외부 알림
+
+### Claude Code·Codex 상태
+
+설정 창의 **에이전트** 탭(또는 메뉴 막대 아이콘 → "Claude Code 훅 설치")에서 훅을 설치하면, Claude Code 세션의 상태가 아일랜드에 나타납니다.
+
+- **권한 요청**: Claude Code가 도구 실행 허락을 구하면 아일랜드가 펼쳐지고 **허용**·**거부** 버튼이 붙은 카드가 뜹니다. `agents.approvalTimeoutSec`(기본 120초) 안에 누르지 않으면 카드가 닫히고 터미널에서 평소처럼 묻습니다. 터미널에서 먼저 답하면 카드도 닫힙니다.
+- **입력 대기와 완료**: 세션이 입력을 기다리거나 답을 마치면 짧은 카드를 띄웁니다. 완료 카드에는 마지막 답변의 첫 줄이 나옵니다.
+- **터미널 창으로 이동**: 카드나 위젯을 누르면 `omniwmctl window navigate`로 그 세션이 돌고 있는 터미널 창으로 이동합니다. 훅 프로세스의 부모 프로세스를 따라 올라가서 OmniWM 창을 찾고, tmux처럼 찾을 수 없으면 터미널 앱을 앞으로 가져옵니다.
+- **위젯**: `widgets.leftWing`/`rightWing`에 `agents`를 넣으면 노치 옆에 세션마다 상태 점(파랑 작업 중, 노랑 입력 대기, 주황 승인 필요, 초록 완료)과 가장 급한 세션의 프로젝트 이름이 보입니다. `leftPanel`/`rightPanel`에 `agents`를 넣으면 위젯 칸에 세션 목록이 나옵니다.
+- 훅 설치는 `~/.claude/settings.json`의 `hooks`에 OmniIsland 항목만 추가하고, 바꾸기 전 파일을 `settings.json.omni-island-backup`으로 남깁니다. 이미 실행 중인 세션은 다시 시작해야 적용됩니다. OmniIsland가 꺼져 있으면 훅은 아무것도 하지 않고 바로 끝납니다.
+- **Codex**: `~/.codex/config.toml`에 `notify = ["/Applications/OmniIsland.app/Contents/MacOS/OmniIsland", "hook", "codex"]`를 넣으면 답을 마칠 때 알립니다.
+
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `agents.enabled` | `true` | 훅 이벤트를 받아 보여 줍니다. |
+| `agents.approvals` / `approvalTimeoutSec` | `true` / `120` | 권한 요청에 버튼을 띄우는지와, 응답을 기다리는 시간입니다. |
+| `agents.notifyDone` / `notifyWaiting` | `true` / `true` | 완료와 입력 대기 카드를 띄웁니다. |
+| `agents.cardDurationMs` / `keepDoneMin` | `5000` / `30` | 카드 표시 시간과, 끝난 세션을 위젯에 남겨 두는 시간(분)입니다. |
+
+### 스크립트에서 카드 띄우기
+
+Homebrew로 설치하면 `omni-island` 명령이 함께 설치됩니다. 앱이 `~/Library/Application Support/OmniIsland/island.sock`에서 요청을 받으므로, 빌드 스크립트나 텔레그램·디스코드 봇 중계, CI 결과 확인처럼 어디서든 카드를 띄울 수 있습니다.
+
+```bash
+omni-island notify --title "빌드 완료" --body "3분 12초" --icon hammer --color "#30D158"
+omni-island notify --id upload --title "업로드 중" --progress 0.4   # 같은 id로 다시 보내면 내용만 바뀝니다
+omni-island dismiss --id upload
+omni-island help
+```
+
+`--app`(보낸 곳 이름), `--bundle-id`(그 앱 아이콘 사용), `--duration`(초)도 쓸 수 있습니다. 소켓에 한 줄짜리 JSON(`{"type":"notify","title":"…"}`)을 직접 보내도 됩니다.
 
 ## 문제 해결
 
