@@ -57,6 +57,7 @@ struct WidgetTile: View {
                 NextEventTile(model: model, wide: false, unit: unit)
             }
         case "notifications": NotificationsTile(model: model, wide: wide, unit: unit)
+        case "agents": AgentsTile(model: model, wide: wide, unit: unit)
         default: EmptyView()
         }
     }
@@ -308,6 +309,67 @@ private struct NotificationsTile: View {
                     .font(model.textFont(size: unit * 0.12, weight: .regular))
                     .foregroundStyle(p.secondary)
             }
+        }
+    }
+}
+
+/// Coding agent sessions: their state and project; a row opens its terminal.
+private struct AgentsTile: View {
+    @ObservedObject var model: IslandModel
+    let wide: Bool
+    let unit: CGFloat
+
+    var body: some View {
+        let p = model.palette
+        let sessions = model.agentSessions
+        if sessions.isEmpty {
+            VStack(spacing: 4) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: unit * 0.22))
+                Text("에이전트 없음")
+                    .font(model.textFont(size: unit * 0.12, weight: .regular))
+            }
+            .foregroundStyle(p.secondary)
+        } else if wide {
+            VStack(alignment: .leading, spacing: unit * 0.07) {
+                ForEach(Array(sessions.prefix(3))) { s in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color(hex: s.state.color, fallback: p.accent))
+                            .frame(width: unit * 0.07, height: unit * 0.07)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(s.project)
+                                .font(model.textFont(size: unit * 0.14, weight: .medium))
+                                .lineLimit(1)
+                            Text(s.detail.map { "\(s.state.label) · \($0)" } ?? s.state.label)
+                                .font(model.textFont(size: unit * 0.11, weight: .regular))
+                                .foregroundStyle(p.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.openAgent(s) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let top = AgentSession.mostUrgent(sessions) {
+            VStack(spacing: unit * 0.06) {
+                HStack(spacing: 3) {
+                    ForEach(Array(sessions.prefix(4))) { s in
+                        Circle()
+                            .fill(Color(hex: s.state.color, fallback: p.accent))
+                            .frame(width: unit * 0.09, height: unit * 0.09)
+                    }
+                }
+                Text(top.project)
+                    .font(model.textFont(size: unit * 0.13, weight: .medium))
+                    .lineLimit(1)
+                Text(top.state.label)
+                    .font(model.textFont(size: unit * 0.11, weight: .regular))
+                    .foregroundStyle(Color(hex: top.state.color, fallback: p.secondary))
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { model.openAgent(top) }
         }
     }
 }

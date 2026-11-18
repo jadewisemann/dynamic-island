@@ -16,6 +16,8 @@ cask "omni-island" do
   depends_on macos: ">= :sonoma"
 
   app "OmniIsland.app"
+  # The app's executable doubles as the `omni-island` command (notify, hook).
+  binary "#{appdir}/OmniIsland.app/Contents/MacOS/OmniIsland", target: "omni-island"
 
   # The app is signed with a self-signed certificate, not notarized by Apple,
   # so Gatekeeper would refuse to open it while it carries the quarantine flag.

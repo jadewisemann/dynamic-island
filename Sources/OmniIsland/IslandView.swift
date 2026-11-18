@@ -406,8 +406,54 @@ struct WingView: View {
                 }
                 .foregroundStyle(p.secondary)
             }
+        case "agents":
+            AgentWing(model: model, size: size)
         default:
             EmptyView()
+        }
+    }
+}
+
+/// Dots for the agent sessions, plus the project of the most urgent one.
+struct AgentWing: View {
+    @ObservedObject var model: IslandModel
+    let size: CGFloat
+
+    var body: some View {
+        let sessions = model.agentSessions
+        if let top = AgentSession.mostUrgent(sessions) {
+            HStack(spacing: 5) {
+                HStack(spacing: 3) {
+                    ForEach(Array(sessions.prefix(4))) { s in
+                        Circle()
+                            .fill(Color(hex: s.state.color, fallback: model.palette.accent))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                Text(top.project)
+                    .font(model.textFont(size: size * 0.8, weight: .medium))
+                    .foregroundStyle(model.palette.secondary)
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { model.openAgent(top) }
+        }
+    }
+}
+
+extension AgentSession {
+    /// Approval first, then waiting, then working, then done; newest first.
+    static func mostUrgent(_ sessions: [AgentSession]) -> AgentSession? {
+        func rank(_ s: State) -> Int {
+            switch s {
+            case .approval: return 0
+            case .waiting: return 1
+            case .working: return 2
+            case .done: return 3
+            }
+        }
+        return sessions.min { a, b in
+            rank(a.state) != rank(b.state) ? rank(a.state) < rank(b.state) : a.updated > b.updated
         }
     }
 }
@@ -996,7 +1042,9 @@ struct EventProgressBar: View {
 
     var body: some View {
         let color = model.palette.progress
-        let ms = model.phase == .notification ? model.config.notifications.durationMs : model.config.behavior.eventDurationMs
+        let ms = model.phase == .notification
+            ? (model.notification?.durationMs ?? model.config.notifications.durationMs)
+            : model.config.behavior.eventDurationMs
         let duration = max(ms, 100) / 1000
         GeometryReader { proxy in
             Capsule()

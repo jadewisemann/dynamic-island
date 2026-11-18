@@ -19,6 +19,7 @@ struct IslandConfig: Equatable {
     var calendar = CalendarConfig()
     var dashboard = Dashboard()
     var launcher = Launcher()
+    var agents = Agents()
     // JSON key "animation"; named `motion` in Swift because `Binding.animation(_:)` would shadow it.
     var motion = AnimationConfig()
 
@@ -177,7 +178,7 @@ struct IslandConfig: Equatable {
 
     struct Widgets: Equatable {
         /// Content of the notch-height strip, left and right of the notch:
-        /// app | workspace | clock | date | windows | nextEvent | notifications | none
+        /// app | workspace | clock | date | windows | nextEvent | notifications | agents | none
         var leftWing = "app"
         var rightWing = "workspace"
         /// name | number | both
@@ -189,7 +190,7 @@ struct IslandConfig: Equatable {
         var clockFormat = "24h"
         /// Square widget tiles attached to the left and right of the island
         /// while the workspace row is shown:
-        /// clock | calendar | nextEvent | events | notifications
+        /// clock | calendar | nextEvent | events | notifications | agents
         var leftPanel = ["clock"]
         var rightPanel = ["calendar"]
         /// Width of each side panel in squares (1–3). More widgets than
@@ -256,6 +257,21 @@ struct IslandConfig: Equatable {
         var calculator = true
         /// Width of the island while the launcher is open.
         var width = 560.0
+    }
+
+    /// Coding agents (Claude Code, Codex) reporting through `omni-island hook`.
+    struct Agents: Equatable {
+        var enabled = true
+        /// Permission requests get allow / deny buttons on the island.
+        var approvals = true
+        /// Unanswered requests fall back to the terminal prompt after this.
+        var approvalTimeoutSec = 120.0
+        var notifyDone = true
+        var notifyWaiting = true
+        /// How long "done" and "waiting" cards stay.
+        var cardDurationMs = 5000.0
+        /// Finished sessions stay in the agents widget this long.
+        var keepDoneMin = 30.0
     }
 
     struct AnimationConfig: Equatable {
@@ -576,6 +592,15 @@ extension IslandConfig {
         c.launcher.calculator = la.bool("calculator", c.launcher.calculator)
         c.launcher.width = la.number("width", c.launcher.width)
 
+        let ag = r.sub("agents")
+        c.agents.enabled = ag.bool("enabled", c.agents.enabled)
+        c.agents.approvals = ag.bool("approvals", c.agents.approvals)
+        c.agents.approvalTimeoutSec = ag.number("approvalTimeoutSec", c.agents.approvalTimeoutSec)
+        c.agents.notifyDone = ag.bool("notifyDone", c.agents.notifyDone)
+        c.agents.notifyWaiting = ag.bool("notifyWaiting", c.agents.notifyWaiting)
+        c.agents.cardDurationMs = ag.number("cardDurationMs", c.agents.cardDurationMs)
+        c.agents.keepDoneMin = ag.number("keepDoneMin", c.agents.keepDoneMin)
+
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
         c.motion.response = n.number("response", c.motion.response)
@@ -706,7 +731,7 @@ extension IslandConfig {
         let q = Self.quote, n = Self.number
         func b(_ v: Bool) -> String { v ? "true" : "false" }
         let t = trigger, be = behavior, a = appearance, an = motion, th = theme, l = layout, w = widgets
-        let no = notifications, ca = calendar, d = dashboard, la = launcher
+        let no = notifications, ca = calendar, d = dashboard, la = launcher, ag = agents
         func list(_ values: [String]) -> String { "[" + values.map { q($0) }.joined(separator: ", ") + "]" }
         func numberList(_ values: [Double]) -> String { "[" + values.map { n($0) }.joined(separator: ", ") + "]" }
         let saved = th.saved.map { "      " + Self.savedThemeLine($0) + "," }.joined(separator: "\n")
@@ -900,6 +925,20 @@ extension IslandConfig {
             // 2^10*3 같은 수식을 계산합니다. Return을 누르면 결과를 복사합니다.
             "calculator": \(b(la.calculator)),
             "width": \(n(la.width)),
+          },
+
+          "agents": {
+            // Claude Code·Codex 훅이 보내는 상태를 아일랜드에 보여 줍니다.
+            // 훅은 설정 창의 에이전트 탭에서 설치합니다.
+            "enabled": \(b(ag.enabled)),
+            // 권한 요청에 허용·거부 버튼을 띄웁니다. 시간 안에 답하지 않으면 터미널에서 묻습니다.
+            "approvals": \(b(ag.approvals)),
+            "approvalTimeoutSec": \(n(ag.approvalTimeoutSec)),
+            "notifyDone": \(b(ag.notifyDone)),
+            "notifyWaiting": \(b(ag.notifyWaiting)),
+            "cardDurationMs": \(n(ag.cardDurationMs)),
+            // 끝난 세션을 에이전트 위젯에 남겨 두는 시간(분)입니다.
+            "keepDoneMin": \(n(ag.keepDoneMin)),
           },
 
           "animation": {

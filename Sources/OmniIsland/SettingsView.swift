@@ -42,6 +42,9 @@ final class SettingsModel: ObservableObject {
     var onRecordNotificationDiagnostics: (() -> Void)?
     var onOpenCalendarPrivacy: (() -> Void)?
     var onOpenFullDiskAccess: (() -> Void)?
+    @Published var claudeHooksInstalled = false
+    var onToggleClaudeHooks: (() -> Void)?
+    var onTestAgentCard: (() -> Void)?
 
     private var saveWork: DispatchWorkItem?
     private var suppressSave = false
@@ -238,6 +241,8 @@ struct SettingsView: View {
                     .tabItem { Label("알림·일정", systemImage: "bell.badge") }
                 LauncherSettings(model: model)
                     .tabItem { Label("런처", systemImage: "magnifyingglass") }
+                AgentSettings(model: model)
+                    .tabItem { Label("에이전트", systemImage: "sparkle") }
                 AnimationSettings(model: model)
                     .tabItem { Label("애니메이션", systemImage: "wand.and.stars") }
                 ConnectionSettings(model: model)
@@ -846,6 +851,7 @@ private struct WidgetSettings: View {
             Text("창 개수").tag("windows")
             Text("다음 일정").tag("nextEvent")
             Text("놓친 알림 수").tag("notifications")
+            Text("코딩 에이전트").tag("agents")
             Text("없음").tag("none")
         }
     }
@@ -855,7 +861,7 @@ private struct WidgetSettings: View {
 
 /// The widgets that can go into a side panel slot.
 enum PanelWidgetKind: String, CaseIterable, Identifiable {
-    case clock, calendar, nextEvent, events, notifications
+    case clock, calendar, nextEvent, events, notifications, agents
 
     var id: String { rawValue }
 
@@ -866,6 +872,7 @@ enum PanelWidgetKind: String, CaseIterable, Identifiable {
         case .nextEvent: return "다음 일정"
         case .events: return "오늘 일정"
         case .notifications: return "최근 알림"
+        case .agents: return "코딩 에이전트"
         }
     }
 
@@ -876,6 +883,7 @@ enum PanelWidgetKind: String, CaseIterable, Identifiable {
         case .nextEvent: return "calendar.badge.clock"
         case .events: return "list.bullet.rectangle"
         case .notifications: return "bell.badge"
+        case .agents: return "sparkle"
         }
     }
 
@@ -1264,6 +1272,73 @@ private struct AnimationSettings: View {
             SliderRow(title: "재생 시간", value: $model.draft.motion.durationMs,
                       range: 100...1200, step: 10, unit: "ms")
         }
+    }
+}
+
+private struct AgentSettings: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("코딩 에이전트 상태 보여 주기", isOn: $model.draft.agents.enabled)
+                LabeledContent("Claude Code 훅") {
+                    HStack {
+                        if model.claudeHooksInstalled {
+                            Label("설치됨", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                        Button(model.claudeHooksInstalled ? "제거" : "설치") { model.onToggleClaudeHooks?() }
+                    }
+                }
+                Text("설치하면 ~/.claude/settings.json에 OmniIsland 훅을 추가합니다. 기존 설정과 훅은 그대로 두고, 바꾸기 전 파일은 settings.json.omni-island-backup으로 남깁니다. 이미 실행 중인 Claude Code 세션은 다시 시작해야 훅이 적용됩니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("연결")
+            }
+
+            Section("권한 요청") {
+                Toggle("아일랜드에서 허용·거부하기", isOn: $model.draft.agents.approvals)
+                SliderRow(title: "응답 기다리는 시간", value: $model.draft.agents.approvalTimeoutSec,
+                          range: 15...300, step: 5, unit: "초")
+                Text("시간 안에 누르지 않으면 카드가 닫히고 터미널에서 평소처럼 묻습니다. 카드를 누르면 그 세션이 열린 터미널 창으로 이동합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("승인 카드 미리보기") { model.onTestAgentCard?() }
+            }
+            .disabled(!model.draft.agents.enabled)
+
+            Section("알림") {
+                Toggle("작업을 마치면 알리기", isOn: $model.draft.agents.notifyDone)
+                Toggle("입력을 기다리면 알리기", isOn: $model.draft.agents.notifyWaiting)
+                SliderRow(title: "카드 표시 시간", value: $model.draft.agents.cardDurationMs,
+                          range: 1000...15000, step: 500, unit: "ms")
+                Text("노치 옆 날개나 위젯 칸에 \"코딩 에이전트\"를 넣으면 세션마다 상태 점이 보입니다. 파랑은 작업 중, 노랑은 입력 대기, 주황은 승인 필요, 초록은 완료입니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(!model.draft.agents.enabled)
+
+            Section("Codex") {
+                Text("~/.codex/config.toml에 다음 줄을 넣으면 Codex가 답을 마칠 때 알립니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(CodexHookInfo.configLine)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+
+            Section("스크립트에서 카드 띄우기") {
+                Text("omni-island notify --title \"빌드 완료\" --body \"3분 12초\" --icon hammer")
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                Text("Homebrew로 설치하면 omni-island 명령이 PATH에 들어갑니다. 텔레그램 봇이나 CI 결과 알림처럼 아무 스크립트에서나 호출할 수 있습니다. omni-island help로 옵션을 볼 수 있습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

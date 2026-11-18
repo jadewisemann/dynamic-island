@@ -7,7 +7,16 @@ struct NotificationIcon: View {
     let size: CGFloat
 
     var body: some View {
-        if let bundleId = notification.bundleId, !bundleId.isEmpty {
+        if let symbol = notification.symbol, !symbol.isEmpty {
+            Image(systemName: symbol)
+                .font(.system(size: size * 0.55, weight: .semibold))
+                .foregroundStyle(Color(hex: notification.tint ?? "", fallback: .white))
+                .frame(width: size, height: size)
+                .background(
+                    RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                        .fill(Color(hex: notification.tint ?? "", fallback: .white).opacity(0.16))
+                )
+        } else if let bundleId = notification.bundleId, !bundleId.isEmpty {
             AppIconView(app: AppRef(name: notification.appName, bundleId: bundleId), size: size)
         } else {
             Image(systemName: notification.source == .calendar ? "calendar" : "bell.fill")
@@ -68,6 +77,14 @@ struct NotificationCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            if !notification.actions.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(notification.actions) { action in
+                        ActionButton(model: model, notification: notification, action: action)
+                    }
+                }
+                .padding(.top, 4)
+            }
         }
         .padding(.top, 8)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -89,6 +106,37 @@ struct NotificationCard: View {
         let subtitle = notification.source == .calendar ? nil : text.subtitle
         let parts = [subtitle, text.body].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? nil : parts.joined(separator: " — ")
+    }
+}
+
+/// A capsule button on a notification card.
+private struct ActionButton: View {
+    @ObservedObject var model: IslandModel
+    let notification: IslandNotification
+    let action: NotificationAction
+    @State private var hovering = false
+
+    var body: some View {
+        let p = model.palette
+        let size = CGFloat(model.config.appearance.fontSize)
+        let fill: Color = {
+            switch action.role {
+            case .primary: return p.accent
+            case .destructive: return Color(hex: "#FF453A", fallback: .red).opacity(0.85)
+            case .normal: return p.fill.opacity(0.16)
+            }
+        }()
+        Text(action.label)
+            .font(model.textFont(size: size * 0.82, weight: .semibold))
+            .foregroundStyle(action.role == .normal ? p.text : Color.white)
+            .lineLimit(1)
+            .frame(minWidth: 54)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(fill.opacity(hovering ? 1 : 0.88)))
+            .contentShape(Capsule())
+            .onHover { hovering = $0 }
+            .onTapGesture { model.perform(action, on: notification) }
     }
 }
 

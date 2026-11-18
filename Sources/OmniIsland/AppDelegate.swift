@@ -5,6 +5,8 @@ import SwiftUI
 struct OmniIslandMain {
     @MainActor
     static func main() {
+        // `omni-island notify …` and the agent hooks run the same executable.
+        if let code = IslandCLI.run(CommandLine.arguments) { exit(code) }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -28,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let calendarProvider = CalendarProvider()
     private let notificationDatabase = NotificationDatabaseWatcher()
     private let deduplicator = NotificationDeduplicator()
+    private let socketServer = IslandSocketServer()
+    private let agents = AgentMonitor()
     private var windowController: IslandWindowController?
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
@@ -126,6 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsModel?.calendarAccess = access
         }
         configureWidgets(configStore.config)
+        setUpAgents()
         setUpOnboarding()
         let launchSteps = isDemo ? [] : OnboardingStore.launchSteps(for: configStore.config)
         // The onboarding window explains Accessibility before macOS asks.
@@ -192,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureBadges(config)
         configureWidgets(config)
         configureLauncher(config)
+        agents.config = config.agents
         windowController?.reposition()
         if previous.omniwmctlPath != config.omniwmctlPath || previous.socketPath != config.socketPath {
             if !isDemo {
@@ -205,6 +211,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsModel?.configError = configStore.lastError
         configErrorMenuItem?.title = configStore.lastError ?? ""
         configErrorMenuItem?.isHidden = configStore.lastError == nil
+    }
+
+    // MARK: - Agents and the local socket
+
+    private func setUpAgents() {
+        agents.config = configStore.config.agents
+        agents.windowsProvider = { [weak self] in
+            guard let self else { return ([], nil) }
+            return (self.tracker.windows, self.tracker.focusedWindowId)
+        }
+        agents.onSessionsChange = { [weak self] sessions in
+            self?.model.setAgentSessions(sessions)
+            self?.windowController?.reposition()
+        }
+        agents.present = { [weak self] n in self?.model.present(notification: n) }
+        agents.dismiss = { [weak self] id in self?.model.dismiss(externalId: id) }
+        agents.start()
+        model.onNotificationAction = { [weak self] n, action in
+            self?.agents.perform(action, on: n)
+        }
+        model.onOpenAgent = { [weak self] session in
+            self?.focusTerminal(windowId: session.windowId, bundleId: session.bundleId)
+        }
+        socketServer.onRequest = { [weak self] request, reply in
+            guard let self else { return reply(nil) }
+            self.handle(request: request, reply: reply)
+        }
+        socketServer.start()
+    }
+
+    private func handle(request: [String: Any], reply: @escaping ([String: Any]?) -> Void) {
+        switch request["type"] as? String ?? "" {
+        case "agent":
+            agents.handle(request, reply: reply)
+        case "notify":
+            model.present(notification: Self.externalNotification(request))
+            reply(["ok": true])
+        case "dismiss":
+            if let id = request["id"] as? String { model.dismiss(externalId: "ext:" + id) }
+            reply(["ok": true])
+        default:
+            reply(["ok": false, "error": "unknown type"])
+        }
+    }
+
+    /// A card from `omni-island notify`.
+    private static func externalNotification(_ r: [String: Any]) -> IslandNotification {
+        func text(_ key: String) -> String? {
+            (r[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        }
+        var n = IslandNotification(source: .external, appName: text("app") ?? "알림",
+                                   bundleId: text("bundle-id"), title: text("title") ?? "",
+                                   subtitle: text("subtitle"), body: text("body"))
+        n.symbol = text("icon") ?? (n.bundleId == nil ? "bell.fill" : nil)
+        n.tint = text("color")
+        if let seconds = (r["duration"] as? NSNumber)?.doubleValue, seconds > 0 {
+            n.durationMs = seconds * 1000
+        }
+        if let progress = (r["progress"] as? NSNumber)?.doubleValue {
+            n.detail = "\(Int((min(max(progress, 0), 1) * 100).rounded()))%"
+        }
+        if let id = text("id") {
+            n.externalId = "ext:" + id
+            n.group = "ext:" + id
+        }
+        return n
+    }
+
+    /// Goes to the OmniWM window an agent runs in, or its terminal app.
+    private func focusTerminal(windowId: String?, bundleId: String?) {
+        if let windowId {
+            runWindowCommand(["window", "navigate", windowId], fallbackBundleId: bundleId)
+        } else if let bundleId {
+            activateApp(bundleId: bundleId)
+        }
+    }
+
+    @objc private func toggleClaudeHooks() {
+        do {
+            if ClaudeHookInstaller.isInstalled() {
+                try ClaudeHookInstaller.uninstall()
+            } else {
+                try ClaudeHookInstaller.install()
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Claude Code 훅을 바꾸지 못했습니다"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+        rebuildStatusItem()
+        settingsModel?.claudeHooksInstalled = ClaudeHookInstaller.isInstalled()
     }
 
     // MARK: - Launcher
@@ -277,6 +375,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Notification history
 
     private func openNotification(_ n: IslandNotification) {
+        if n.source == .agent || n.windowId != nil {
+            return focusTerminal(windowId: n.windowId, bundleId: n.bundleId)
+        }
         let bundleId = n.source == .calendar ? "com.apple.iCal" : n.bundleId
         if let bundleId, !bundleId.isEmpty { activateApp(bundleId: bundleId) }
     }
@@ -437,6 +538,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recentMenu = NSMenu()
         recent.submenu = recentMenu
         menu.addItem(recent)
+        let hooks = makeItem("Claude Code 훅 설치", #selector(toggleClaudeHooks), "")
+        hooks.state = ClaudeHookInstaller.isInstalled() ? .on : .off
+        menu.addItem(hooks)
         rebuildRecentMenu()
         menu.addItem(makeItem("설정…", #selector(showSettings), ","))
         menu.addItem(makeItem("설정 파일 열기", #selector(openConfig), ""))
@@ -481,6 +585,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.onRecordNotificationDiagnostics = { [weak self] in self?.recordNotificationDiagnostics() }
         settings.onOpenFullDiskAccess = { [weak self] in
             self?.showOnboarding(at: .fullDiskAccess)
+        }
+        settings.claudeHooksInstalled = ClaudeHookInstaller.isInstalled()
+        settings.onToggleClaudeHooks = { [weak self] in self?.toggleClaudeHooks() }
+        settings.onTestAgentCard = { [weak self] in
+            var n = IslandNotification(source: .agent, appName: "Claude Code · omni-island", bundleId: nil,
+                                       title: "Bash 실행을 허용할까요?", subtitle: nil,
+                                       body: "Bash: swift build")
+            n.symbol = "sparkle"
+            n.tint = AgentSession.State.approval.color
+            n.actions = [AgentMonitor.allowAction, AgentMonitor.denyAction]
+            self?.model.present(notification: n)
         }
         settings.onOpenCalendarPrivacy = {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
