@@ -12,6 +12,9 @@ struct IslandConfig: Equatable {
     var trigger = Trigger()
     var behavior = Behavior()
     var appearance = Appearance()
+    var theme = Theme()
+    var layout = Layout()
+    var widgets = Widgets()
     // JSON key "animation"; named `motion` in Swift because `Binding.animation(_:)` would shadow it.
     var motion = AnimationConfig()
 
@@ -52,20 +55,58 @@ struct IslandConfig: Equatable {
         var badgeIntervalMs = 3000.0
     }
 
-    struct Appearance: Equatable {
+    /// Everything a theme preset changes. Stored flat in "appearance" (the
+    /// dark / fixed look) and in "theme.light" (the light look).
+    struct ThemeColors: Equatable {
+        /// solid | material | gradient
+        var backgroundStyle = "solid"
         var backgroundColor = "#000000"
+        /// Solid / gradient opacity, or how strongly the color tints the material.
         var backgroundOpacity = 1.0
+        /// thin | regular | thick (material only)
+        var material = "regular"
+        /// Second gradient color (gradient only).
+        var gradientColor = "#1C1C1E"
+        /// Gradient direction in degrees: 0 left→right, 90 top→bottom.
+        var gradientAngle = 90.0
         var accentColor = "#0A84FF"
         var textColor = "#FFFFFF"
         var secondaryTextColor = "#FFFFFF99"
+        /// Text on the highlighted (active) workspace.
+        var activeTextColor = "#FFFFFF"
+        /// Base color of inactive workspace backgrounds, window dots and the
+        /// border. Drawn at low opacity, so white suits dark themes and black
+        /// suits light ones.
+        var fillColor = "#FFFFFF"
+        var badgeColor = "#FF3B30"
+        var badgeTextColor = "#FFFFFF"
+        /// Remaining-time bar. Empty uses the accent color.
+        var progressColor = ""
+        var borderOpacity = 0.0
+        var shadow = true
+        /// How the active workspace is marked: fill | outline | underline | dot
+        var activeStyle = "fill"
+        /// Soft accent glow around the active workspace.
+        var activeGlow = true
+    }
+
+    struct Appearance: Equatable {
+        var colors = ThemeColors()
         var bottomCornerRadius = 20.0
         /// Radius of the small concave "shoulders" where the island meets the
         /// top edge of the screen, like the real notch.
         var topCornerRadius = 7.0
         var fontSize = 13.0
+        /// Installed font family name. Empty uses the system font.
+        var fontFamily = ""
+        /// System font design: default | rounded | monospaced | serif
+        var fontDesign = "default"
+        /// light | regular | bold | heavy (shifts every weight in the island)
+        var fontWeight = "regular"
+        /// Font of workspace numbers and names: same | default | rounded | monospaced | serif
+        var numberFontDesign = "rounded"
         var pillSize = 24.0
         var pillSpacing = 6.0
-        var shadow = true
         /// Used on screens without a notch.
         var fallbackNotchWidth = 200.0
         var fallbackNotchHeight = 32.0
@@ -75,8 +116,6 @@ struct IslandConfig: Equatable {
         var expandedWidth = 400.0
         var expandedHeaderHeight = 54.0
         var showAppIcons = true
-        var showFocusedApp = true
-        var borderOpacity = 0.0
         var showEventProgress = true
         /// apps: workspace number followed by its app icons (like OmniWM's
         /// workspace bar). pills: compact numbered capsules only.
@@ -94,6 +133,56 @@ struct IslandConfig: Equatable {
         var highlightFocusedWindow = true
     }
 
+    struct Theme: Equatable {
+        /// fixed: always use the "appearance" colors.
+        /// system: "appearance" in dark mode, `light` in light mode.
+        var mode = "fixed"
+        var light = ThemePreset.light.colors
+        /// Themes the user saved from the settings window.
+        var saved: [SavedTheme] = []
+    }
+
+    struct SavedTheme: Equatable, Identifiable {
+        var name: String
+        var colors: ThemeColors
+        var id: String { name }
+    }
+
+    struct Layout: Equatable {
+        /// attached: grows out of the notch. floating: a separate rounded
+        /// island below the menu bar.
+        var shape = "attached"
+        /// Gap between the menu bar and a floating island.
+        var topGap = 8.0
+        /// center | left | right. Screens with a notch always use center.
+        var horizontalPosition = "center"
+        /// Extra horizontal shift in points (screens without a notch).
+        var horizontalOffset = 0.0
+        /// auto: as wide as the content. fixed: at least `fixedWidth`.
+        var widthMode = "auto"
+        var fixedWidth = 420.0
+        /// Workspace row alignment: center | leading | spread
+        var rowAlignment = "center"
+        /// Space between the island edge and its content.
+        var contentPadding = 20.0
+        /// Where the move notification goes: below | above | replace
+        var eventPlacement = "below"
+    }
+
+    struct Widgets: Equatable {
+        /// Content of the notch-height strip, left and right of the notch:
+        /// app | workspace | clock | date | windows | none
+        var leftWing = "app"
+        var rightWing = "workspace"
+        /// name | number | both
+        var workspaceLabel = "name"
+        var eventIcon = true
+        var eventSubtitle = true
+        var eventFromTo = true
+        /// 24h | 12h | 24hSeconds
+        var clockFormat = "24h"
+    }
+
     struct AnimationConfig: Equatable {
         /// spring | bouncy | smooth | snappy | easeInOut | none
         var style = "spring"
@@ -103,10 +192,178 @@ struct IslandConfig: Equatable {
         var dampingFraction = 0.76
         /// Duration for easeInOut / bouncy / smooth / snappy.
         var durationMs = 380.0
-        /// Blur content while it fades in/out.
-        var blurTransitions = true
+        /// Multiplies the speed of every island animation.
+        var speed = 1.0
+        /// How content appears: blur | fade | slide | none
+        var contentTransition = "blur"
         /// Small scale "pop" when the island expands for an event.
         var popOnEvent = true
+    }
+}
+
+// MARK: - Theme presets
+
+struct ThemePreset: Identifiable {
+    let id: String
+    let name: String
+    let colors: IslandConfig.ThemeColors
+    /// Fonts the preset also sets; nil leaves the current font alone.
+    var fontDesign: String? = nil
+    var numberFontDesign: String? = nil
+
+    static let standard = ThemePreset(id: "default", name: "기본", colors: .init(), fontDesign: "default", numberFontDesign: "rounded")
+
+    static let midnight: ThemePreset = {
+        var c = IslandConfig.ThemeColors()
+        c.backgroundColor = "#121A33"
+        c.accentColor = "#7A8CFF"
+        c.textColor = "#E6ECFF"
+        c.secondaryTextColor = "#B8C4ECB3"
+        c.activeTextColor = "#0D1330"
+        c.fillColor = "#A0B4FF"
+        c.borderOpacity = 0.1
+        return ThemePreset(id: "midnight", name: "미드나잇", colors: c, fontDesign: "default", numberFontDesign: "rounded")
+    }()
+
+    static let glass: ThemePreset = {
+        var c = IslandConfig.ThemeColors()
+        c.backgroundStyle = "material"
+        c.material = "thin"
+        c.backgroundColor = "#1E1E24"
+        c.backgroundOpacity = 0.35
+        c.accentColor = "#FFFFFF"
+        c.activeTextColor = "#111111"
+        c.secondaryTextColor = "#FFFFFFB3"
+        c.borderOpacity = 0.18
+        c.activeGlow = false
+        return ThemePreset(id: "glass", name: "글래스", colors: c, fontDesign: "default", numberFontDesign: "rounded")
+    }()
+
+    static let light: ThemePreset = {
+        var c = IslandConfig.ThemeColors()
+        c.backgroundColor = "#F7F7F9"
+        c.accentColor = "#007AFF"
+        c.textColor = "#1A1A1E"
+        c.secondaryTextColor = "#1A1A1E99"
+        c.activeTextColor = "#FFFFFF"
+        c.fillColor = "#000000"
+        c.borderOpacity = 0.08
+        return ThemePreset(id: "light", name: "라이트", colors: c, fontDesign: "default", numberFontDesign: "rounded")
+    }()
+
+    static let sunset: ThemePreset = {
+        var c = IslandConfig.ThemeColors()
+        c.backgroundStyle = "gradient"
+        c.backgroundColor = "#2B0F3A"
+        c.gradientColor = "#0F2F3A"
+        c.gradientAngle = 20
+        c.accentColor = "#FF9F45"
+        c.activeTextColor = "#2B0F3A"
+        c.secondaryTextColor = "#FFFFFFB3"
+        return ThemePreset(id: "sunset", name: "선셋", colors: c, fontDesign: "default", numberFontDesign: "rounded")
+    }()
+
+    static let terminal: ThemePreset = {
+        var c = IslandConfig.ThemeColors()
+        c.accentColor = "#E7E7E7"
+        c.textColor = "#E7E7E7"
+        c.secondaryTextColor = "#8A8A8A"
+        c.activeTextColor = "#000000"
+        c.activeStyle = "outline"
+        c.activeGlow = false
+        c.borderOpacity = 0.2
+        return ThemePreset(id: "terminal", name: "터미널", colors: c, fontDesign: "monospaced", numberFontDesign: "same")
+    }()
+
+    /// Builds a preset from a community palette (r/unixporn favorites).
+    /// Colors are the palettes' official values.
+    private static func palette(_ id: String, _ name: String, bg: String, text: String, subtext: String,
+                                accent: String, red: String, light: Bool = false) -> ThemePreset {
+        var c = IslandConfig.ThemeColors()
+        c.backgroundColor = bg
+        c.textColor = text
+        c.secondaryTextColor = subtext
+        c.accentColor = accent
+        c.activeTextColor = bg
+        c.fillColor = text
+        c.badgeColor = red
+        c.badgeTextColor = bg
+        c.borderOpacity = light ? 0.1 : 0.08
+        c.activeGlow = false
+        return ThemePreset(id: id, name: name, colors: c)
+    }
+
+    static let community: [ThemePreset] = [
+        palette("catppuccin-mocha", "Catppuccin Mocha", bg: "#1E1E2E", text: "#CDD6F4", subtext: "#A6ADC8",
+                accent: "#CBA6F7", red: "#F38BA8"),
+        palette("catppuccin-latte", "Catppuccin Latte", bg: "#EFF1F5", text: "#4C4F69", subtext: "#6C6F85",
+                accent: "#8839EF", red: "#D20F39", light: true),
+        palette("nord", "Nord", bg: "#2E3440", text: "#ECEFF4", subtext: "#D8DEE9",
+                accent: "#88C0D0", red: "#BF616A"),
+        palette("gruvbox", "Gruvbox", bg: "#282828", text: "#EBDBB2", subtext: "#A89984",
+                accent: "#FABD2F", red: "#FB4934"),
+        palette("tokyo-night", "Tokyo Night", bg: "#1A1B26", text: "#C0CAF5", subtext: "#A9B1D6",
+                accent: "#7AA2F7", red: "#F7768E"),
+        palette("rose-pine", "Rosé Pine", bg: "#191724", text: "#E0DEF4", subtext: "#908CAA",
+                accent: "#C4A7E7", red: "#EB6F92"),
+        palette("rose-pine-dawn", "Rosé Pine Dawn", bg: "#FAF4ED", text: "#575279", subtext: "#797593",
+                accent: "#907AA9", red: "#B4637A", light: true),
+        palette("dracula", "Dracula", bg: "#282A36", text: "#F8F8F2", subtext: "#6272A4",
+                accent: "#BD93F9", red: "#FF5555"),
+        palette("everforest", "Everforest", bg: "#2D353B", text: "#D3C6AA", subtext: "#859289",
+                accent: "#A7C080", red: "#E67E80"),
+        palette("kanagawa", "Kanagawa", bg: "#1F1F28", text: "#DCD7BA", subtext: "#727169",
+                accent: "#7E9CD8", red: "#E82424"),
+    ]
+
+    static let builtIn: [ThemePreset] = [standard, midnight, glass, light, sunset, terminal]
+    static let all: [ThemePreset] = builtIn + community
+}
+
+// MARK: - ThemeColors <-> dictionary
+
+extension IslandConfig.ThemeColors {
+    typealias C = IslandConfig.ThemeColors
+
+    static var stringKeys: [(String, WritableKeyPath<C, String>)] {
+        [("backgroundStyle", \.backgroundStyle), ("backgroundColor", \.backgroundColor),
+         ("material", \.material), ("gradientColor", \.gradientColor),
+         ("accentColor", \.accentColor), ("textColor", \.textColor),
+         ("secondaryTextColor", \.secondaryTextColor), ("activeTextColor", \.activeTextColor),
+         ("fillColor", \.fillColor), ("badgeColor", \.badgeColor),
+         ("badgeTextColor", \.badgeTextColor), ("progressColor", \.progressColor),
+         ("activeStyle", \.activeStyle)]
+    }
+
+    static var numberKeys: [(String, WritableKeyPath<C, Double>)] {
+        [("backgroundOpacity", \.backgroundOpacity), ("gradientAngle", \.gradientAngle),
+         ("borderOpacity", \.borderOpacity)]
+    }
+
+    static var boolKeys: [(String, WritableKeyPath<C, Bool>)] {
+        [("shadow", \.shadow), ("activeGlow", \.activeGlow)]
+    }
+
+    /// Reads the keys present in `dict` on top of `base`.
+    init(dict: [String: Any], base: C) {
+        self = base
+        for (key, path) in Self.stringKeys {
+            if let v = dict[key] as? String { self[keyPath: path] = v }
+        }
+        for (key, path) in Self.numberKeys {
+            if let n = dict[key] as? NSNumber, n.doubleValue.isFinite { self[keyPath: path] = n.doubleValue }
+        }
+        for (key, path) in Self.boolKeys {
+            if let v = dict[key] as? Bool { self[keyPath: path] = v }
+        }
+    }
+
+    var dictionary: [String: Any] {
+        var d: [String: Any] = [:]
+        for (key, path) in Self.stringKeys { d[key] = self[keyPath: path] }
+        for (key, path) in Self.numberKeys { d[key] = self[keyPath: path] }
+        for (key, path) in Self.boolKeys { d[key] = self[keyPath: path] }
+        return d
     }
 }
 
@@ -146,25 +403,22 @@ extension IslandConfig {
         c.behavior.badgeIntervalMs = b.number("badgeIntervalMs", c.behavior.badgeIntervalMs)
 
         let a = r.sub("appearance")
-        c.appearance.backgroundColor = a.string("backgroundColor", c.appearance.backgroundColor)
-        c.appearance.backgroundOpacity = a.number("backgroundOpacity", c.appearance.backgroundOpacity)
-        c.appearance.accentColor = a.string("accentColor", c.appearance.accentColor)
-        c.appearance.textColor = a.string("textColor", c.appearance.textColor)
-        c.appearance.secondaryTextColor = a.string("secondaryTextColor", c.appearance.secondaryTextColor)
+        c.appearance.colors = ThemeColors(dict: a.dict, base: c.appearance.colors)
         c.appearance.bottomCornerRadius = a.number("bottomCornerRadius", c.appearance.bottomCornerRadius)
         c.appearance.topCornerRadius = a.number("topCornerRadius", c.appearance.topCornerRadius)
         c.appearance.fontSize = a.number("fontSize", c.appearance.fontSize)
+        c.appearance.fontFamily = a.string("fontFamily", c.appearance.fontFamily)
+        c.appearance.fontDesign = a.string("fontDesign", c.appearance.fontDesign)
+        c.appearance.fontWeight = a.string("fontWeight", c.appearance.fontWeight)
+        c.appearance.numberFontDesign = a.string("numberFontDesign", c.appearance.numberFontDesign)
         c.appearance.pillSize = a.number("pillSize", c.appearance.pillSize)
         c.appearance.pillSpacing = a.number("pillSpacing", c.appearance.pillSpacing)
-        c.appearance.shadow = a.bool("shadow", c.appearance.shadow)
         c.appearance.fallbackNotchWidth = a.number("fallbackNotchWidth", c.appearance.fallbackNotchWidth)
         c.appearance.fallbackNotchHeight = a.number("fallbackNotchHeight", c.appearance.fallbackNotchHeight)
         c.appearance.compactRowHeight = a.number("compactRowHeight", c.appearance.compactRowHeight)
         c.appearance.expandedWidth = a.number("expandedWidth", c.appearance.expandedWidth)
         c.appearance.expandedHeaderHeight = a.number("expandedHeaderHeight", c.appearance.expandedHeaderHeight)
         c.appearance.showAppIcons = a.bool("showAppIcons", c.appearance.showAppIcons)
-        c.appearance.showFocusedApp = a.bool("showFocusedApp", c.appearance.showFocusedApp)
-        c.appearance.borderOpacity = a.number("borderOpacity", c.appearance.borderOpacity)
         c.appearance.showEventProgress = a.bool("showEventProgress", c.appearance.showEventProgress)
         c.appearance.workspaceStyle = a.string("workspaceStyle", c.appearance.workspaceStyle)
         c.appearance.appIconSize = a.number("appIconSize", c.appearance.appIconSize)
@@ -175,12 +429,45 @@ extension IslandConfig {
         c.appearance.multiWindowStyle = a.string("multiWindowStyle", c.appearance.multiWindowStyle)
         c.appearance.highlightFocusedWindow = a.bool("highlightFocusedWindow", c.appearance.highlightFocusedWindow)
 
+        let th = r.sub("theme")
+        c.theme.mode = th.string("mode", c.theme.mode)
+        c.theme.light = ThemeColors(dict: th.sub("light").dict, base: c.theme.light)
+        c.theme.saved = th.objects("saved").compactMap { entry in
+            guard let name = entry["name"] as? String, !name.isEmpty else { return nil }
+            return SavedTheme(name: name, colors: ThemeColors(dict: entry, base: ThemeColors()))
+        }
+
+        let l = r.sub("layout")
+        c.layout.shape = l.string("shape", c.layout.shape)
+        c.layout.topGap = l.number("topGap", c.layout.topGap)
+        c.layout.horizontalPosition = l.string("horizontalPosition", c.layout.horizontalPosition)
+        c.layout.horizontalOffset = l.number("horizontalOffset", c.layout.horizontalOffset)
+        c.layout.widthMode = l.string("widthMode", c.layout.widthMode)
+        c.layout.fixedWidth = l.number("fixedWidth", c.layout.fixedWidth)
+        c.layout.rowAlignment = l.string("rowAlignment", c.layout.rowAlignment)
+        c.layout.contentPadding = l.number("contentPadding", c.layout.contentPadding)
+        c.layout.eventPlacement = l.string("eventPlacement", c.layout.eventPlacement)
+
+        let w = r.sub("widgets")
+        // Older files hid the focused app with appearance.showFocusedApp.
+        if !a.bool("showFocusedApp", true) { c.widgets.leftWing = "none" }
+        c.widgets.leftWing = w.string("leftWing", c.widgets.leftWing)
+        c.widgets.rightWing = w.string("rightWing", c.widgets.rightWing)
+        c.widgets.workspaceLabel = w.string("workspaceLabel", c.widgets.workspaceLabel)
+        c.widgets.eventIcon = w.bool("eventIcon", c.widgets.eventIcon)
+        c.widgets.eventSubtitle = w.bool("eventSubtitle", c.widgets.eventSubtitle)
+        c.widgets.eventFromTo = w.bool("eventFromTo", c.widgets.eventFromTo)
+        c.widgets.clockFormat = w.string("clockFormat", c.widgets.clockFormat)
+
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
         c.motion.response = n.number("response", c.motion.response)
         c.motion.dampingFraction = n.number("dampingFraction", c.motion.dampingFraction)
         c.motion.durationMs = n.number("durationMs", c.motion.durationMs)
-        c.motion.blurTransitions = n.bool("blurTransitions", c.motion.blurTransitions)
+        c.motion.speed = n.number("speed", c.motion.speed)
+        // Older files had a blur on/off switch.
+        if !n.bool("blurTransitions", true) { c.motion.contentTransition = "fade" }
+        c.motion.contentTransition = n.string("contentTransition", c.motion.contentTransition)
         c.motion.popOnEvent = n.bool("popOnEvent", c.motion.popOnEvent)
 
         return c
@@ -193,6 +480,10 @@ private struct ConfigReader {
 
     func sub(_ key: String) -> ConfigReader {
         ConfigReader(dict[key] as? [String: Any] ?? [:])
+    }
+
+    func objects(_ key: String) -> [[String: Any]] {
+        (dict[key] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
     }
 
     func string(_ key: String, _ fallback: String) -> String {
@@ -224,22 +515,70 @@ private struct ConfigReader {
 extension IslandConfig {
     static var defaultFileContents: String { IslandConfig().fileContents() }
 
+    fileprivate static func quote(_ s: String?) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: [s ?? ""], options: [.withoutEscapingSlashes])
+        let array = data.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+        return String(array.dropFirst().dropLast())
+    }
+
+    fileprivate static func number(_ v: Double) -> String {
+        if v.rounded() == v && abs(v) < 1e9 { return String(Int(v)) }
+        var text = String(format: "%.3f", v)
+        while text.hasSuffix("0") { text.removeLast() }
+        return text
+    }
+
+    /// The ThemeColors keys as commented JSON5 lines.
+    fileprivate static func colorLines(_ c: ThemeColors, indent: String) -> String {
+        let q = quote, n = number
+        func b(_ v: Bool) -> String { v ? "true" : "false" }
+        let lines = [
+            "// solid: 단색 | material: 반투명 재질 | gradient: 그라데이션",
+            "\"backgroundStyle\": \(q(c.backgroundStyle)),",
+            "\"backgroundColor\": \(q(c.backgroundColor)),",
+            "// 단색과 그라데이션의 불투명도, 반투명 재질에서는 색을 덧칠하는 강도입니다.",
+            "\"backgroundOpacity\": \(n(c.backgroundOpacity)),",
+            "// thin | regular | thick (반투명 재질의 두께)",
+            "\"material\": \(q(c.material)),",
+            "// 그라데이션의 두 번째 색과 방향(0: 왼쪽→오른쪽, 90: 위→아래)입니다.",
+            "\"gradientColor\": \(q(c.gradientColor)),",
+            "\"gradientAngle\": \(n(c.gradientAngle)),",
+            "\"accentColor\": \(q(c.accentColor)),",
+            "\"textColor\": \(q(c.textColor)),",
+            "\"secondaryTextColor\": \(q(c.secondaryTextColor)),",
+            "// 활성 워크스페이스 위의 글자 색입니다.",
+            "\"activeTextColor\": \(q(c.activeTextColor)),",
+            "// 비활성 워크스페이스 배경, 창 개수 점, 테두리에 옅게 쓰는 기본 색입니다.",
+            "// 어두운 테마는 흰색, 밝은 테마는 검정이 어울립니다.",
+            "\"fillColor\": \(q(c.fillColor)),",
+            "\"badgeColor\": \(q(c.badgeColor)),",
+            "\"badgeTextColor\": \(q(c.badgeTextColor)),",
+            "// 남은 시간 막대 색입니다. 비워 두면 강조색을 씁니다.",
+            "\"progressColor\": \(q(c.progressColor)),",
+            "// 가장자리에 얇은 테두리를 그립니다 (0이면 없음).",
+            "\"borderOpacity\": \(n(c.borderOpacity)),",
+            "\"shadow\": \(b(c.shadow)),",
+            "// 활성 워크스페이스 표시: fill(채움) | outline(테두리) | underline(밑줄) | dot(점)",
+            "\"activeStyle\": \(q(c.activeStyle)),",
+            "\"activeGlow\": \(b(c.activeGlow)),",
+        ]
+        return lines.map { indent + $0 }.joined(separator: "\n")
+    }
+
+    fileprivate static func savedThemeLine(_ theme: SavedTheme) -> String {
+        var dict = theme.colors.dictionary
+        dict["name"] = theme.name
+        let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys, .withoutEscapingSlashes])
+        return data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+
     /// Renders the config as commented JSON5. Used for the first-launch file
     /// and every time the settings window saves.
     func fileContents() -> String {
-        func q(_ s: String?) -> String {
-            let data = try? JSONSerialization.data(withJSONObject: [s ?? ""], options: [.withoutEscapingSlashes])
-            let array = data.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
-            return String(array.dropFirst().dropLast())
-        }
-        func n(_ v: Double) -> String {
-            if v.rounded() == v && abs(v) < 1e9 { return String(Int(v)) }
-            var text = String(format: "%.3f", v)
-            while text.hasSuffix("0") { text.removeLast() }
-            return text
-        }
+        let q = Self.quote, n = Self.number
         func b(_ v: Bool) -> String { v ? "true" : "false" }
-        let t = trigger, be = behavior, a = appearance, an = motion
+        let t = trigger, be = behavior, a = appearance, an = motion, th = theme, l = layout, w = widgets
+        let saved = th.saved.map { "      " + Self.savedThemeLine($0) + "," }.joined(separator: "\n")
 
         return """
         // OmniIsland 설정 파일 (JSON5: 주석과 끝 쉼표를 쓸 수 있습니다)
@@ -280,26 +619,28 @@ extension IslandConfig {
           },
 
           "appearance": {
-            "backgroundColor": \(q(a.backgroundColor)),
-            "backgroundOpacity": \(n(a.backgroundOpacity)),
-            "accentColor": \(q(a.accentColor)),
-            "textColor": \(q(a.textColor)),
-            "secondaryTextColor": \(q(a.secondaryTextColor)),
+            // 아래 색 값은 어두운 모양(또는 theme.mode가 fixed일 때의 모양)입니다.
+        \(Self.colorLines(a.colors, indent: "    "))
+
             "bottomCornerRadius": \(n(a.bottomCornerRadius)),
             "topCornerRadius": \(n(a.topCornerRadius)),
             "fontSize": \(n(a.fontSize)),
+            // 설치된 글꼴 이름입니다. 비워 두면 시스템 글꼴을 씁니다.
+            "fontFamily": \(q(a.fontFamily)),
+            // default | rounded | monospaced | serif
+            "fontDesign": \(q(a.fontDesign)),
+            // light | regular | bold | heavy
+            "fontWeight": \(q(a.fontWeight)),
+            // 워크스페이스 번호와 이름의 글꼴: same(본문과 같게) | default | rounded | monospaced | serif
+            "numberFontDesign": \(q(a.numberFontDesign)),
             "pillSize": \(n(a.pillSize)),
             "pillSpacing": \(n(a.pillSpacing)),
-            "shadow": \(b(a.shadow)),
-            // 가장자리에 아주 얇은 밝은 테두리를 그립니다 (0이면 없음).
-            "borderOpacity": \(n(a.borderOpacity)),
             "fallbackNotchWidth": \(n(a.fallbackNotchWidth)),
             "fallbackNotchHeight": \(n(a.fallbackNotchHeight)),
             "compactRowHeight": \(n(a.compactRowHeight)),
             "expandedWidth": \(n(a.expandedWidth)),
             "expandedHeaderHeight": \(n(a.expandedHeaderHeight)),
             "showAppIcons": \(b(a.showAppIcons)),
-            "showFocusedApp": \(b(a.showFocusedApp)),
             // 펼쳐진 상태가 끝날 때까지 남은 시간을 아래쪽 막대로 보여 줍니다.
             "showEventProgress": \(b(a.showEventProgress)),
             // apps: 워크스페이스 번호 옆에 앱 아이콘을 나열 (OmniWM 바와 비슷)
@@ -317,13 +658,61 @@ extension IslandConfig {
             "highlightFocusedWindow": \(b(a.highlightFocusedWindow)),
           },
 
+          "theme": {
+            // fixed: 항상 appearance의 색을 씁니다.
+            // system: macOS가 다크 모드면 appearance, 라이트 모드면 아래 light의 색을 씁니다.
+            "mode": \(q(th.mode)),
+            "light": {
+        \(Self.colorLines(th.light, indent: "      "))
+            },
+            // 설정 창에서 "내 테마로 저장"한 테마입니다.
+            "saved": [
+        \(saved)
+            ],
+          },
+
+          "layout": {
+            // attached: 노치에서 자라나는 모양 | floating: 메뉴 막대 아래에 떠 있는 캡슐
+            "shape": \(q(l.shape)),
+            // 떠 있는 형태에서 메뉴 막대와 아일랜드 사이의 간격입니다.
+            "topGap": \(n(l.topGap)),
+            // center | left | right (노치가 있는 화면에서는 항상 가운데)
+            "horizontalPosition": \(q(l.horizontalPosition)),
+            "horizontalOffset": \(n(l.horizontalOffset)),
+            // auto: 내용에 맞춤 | fixed: fixedWidth 이상으로 고정
+            "widthMode": \(q(l.widthMode)),
+            "fixedWidth": \(n(l.fixedWidth)),
+            // 워크스페이스 줄 정렬: center | leading | spread
+            "rowAlignment": \(q(l.rowAlignment)),
+            "contentPadding": \(n(l.contentPadding)),
+            // 이동 알림 위치: below(워크스페이스 줄 아래) | above(위) | replace(줄 대신)
+            "eventPlacement": \(q(l.eventPlacement)),
+          },
+
+          "widgets": {
+            // 노치 양옆에 보여 줄 내용: app | workspace | clock | date | windows | none
+            "leftWing": \(q(w.leftWing)),
+            "rightWing": \(q(w.rightWing)),
+            // 워크스페이스 이름: name(OmniWM 표시 이름) | number(번호) | both(번호와 이름)
+            "workspaceLabel": \(q(w.workspaceLabel)),
+            // 이동 알림에 아이콘, 부제목(창 제목), "출발 → 도착"을 보여 줄지 정합니다.
+            "eventIcon": \(b(w.eventIcon)),
+            "eventSubtitle": \(b(w.eventSubtitle)),
+            "eventFromTo": \(b(w.eventFromTo)),
+            // 24h | 12h | 24hSeconds
+            "clockFormat": \(q(w.clockFormat)),
+          },
+
           "animation": {
             // spring | bouncy | smooth | snappy | easeInOut | none
             "style": \(q(an.style)),
             "response": \(n(an.response)),
             "dampingFraction": \(n(an.dampingFraction)),
             "durationMs": \(n(an.durationMs)),
-            "blurTransitions": \(b(an.blurTransitions)),
+            // 모든 움직임의 속도 배율입니다 (1이 기본).
+            "speed": \(n(an.speed)),
+            // 내용이 나타나는 방식: blur | fade | slide | none
+            "contentTransition": \(q(an.contentTransition)),
             "popOnEvent": \(b(an.popOnEvent)),
           },
         }

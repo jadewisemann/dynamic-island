@@ -5,12 +5,15 @@ struct IslandRootView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
+        let position = model.horizontalPosition
+        let alignment: Alignment = position == "left" ? .topLeading : (position == "right" ? .topTrailing : .top)
         // The panel is larger than the island; pin the island to the top.
         VStack(spacing: 0) {
             IslandView(model: model)
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+        .padding(.horizontal, position == "center" ? 0 : IslandWindowController.panelMargin)
     }
 }
 
@@ -19,45 +22,51 @@ struct IslandView: View {
     @Namespace private var ns
 
     private var a: IslandConfig.Appearance { model.config.appearance }
+    private var colors: IslandConfig.ThemeColors { model.colors }
     private var isHidden: Bool { model.phase == .hidden }
 
-    private var background: Color {
-        if isHidden && !model.hiddenStyleFades { return .black }
-        return Color(hex: a.backgroundColor).opacity(a.backgroundOpacity)
+    private var shape: NotchShape {
+        let floating = model.isFloating && !isHidden
+        return NotchShape(
+            topRadius: isHidden || floating ? 0 : CGFloat(a.topCornerRadius),
+            bottomRadius: isHidden ? min(CGFloat(a.bottomCornerRadius), model.geometry.height * 0.35)
+                : CGFloat(a.bottomCornerRadius),
+            topConvexRadius: floating ? CGFloat(a.bottomCornerRadius) : 0
+        )
     }
 
-    private var shape: NotchShape {
-        NotchShape(
-            topRadius: isHidden ? 0 : CGFloat(a.topCornerRadius),
-            bottomRadius: isHidden ? min(CGFloat(a.bottomCornerRadius), model.geometry.height * 0.35)
-                : CGFloat(a.bottomCornerRadius)
-        )
+    private var showsRow: Bool {
+        guard !isHidden else { return false }
+        return !(model.phase == .expanded && model.event != nil && model.eventPlacement == .replace)
     }
 
     var body: some View {
         let size = model.currentSize
-        let topInset = isHidden ? 0 : CGFloat(a.topCornerRadius)
+        let topInset = isHidden || model.isFloating ? 0 : CGFloat(a.topCornerRadius)
 
         VStack(spacing: 0) {
-            if !isHidden {
+            if !isHidden && !model.isFloating {
                 topStrip
                     .frame(height: model.geometry.height)
                     .transition(fade)
-                WorkspaceRow(model: model, ns: ns)
+            }
+            if model.eventPlacement == .above {
+                eventHeader
+            }
+            if showsRow {
+                rowArea
                     .frame(height: model.rowHeight)
                     .transition(fade)
             }
-            if model.phase == .expanded, let event = model.event {
-                EventHeader(model: model, event: event)
-                    .frame(height: CGFloat(a.expandedHeaderHeight))
-                    .padding(.horizontal, 18)
-                    .id(model.eventSerial)
-                    .transition(fade)
+            if model.eventPlacement != .above {
+                eventHeader
             }
         }
         .padding(.horizontal, topInset)
         .frame(width: size.width, height: size.height, alignment: .top)
-        .background(background)
+        .background {
+            IslandBackground(model: model, solidBlack: isHidden && !model.hiddenStyleFades)
+        }
         .overlay(alignment: .bottom) {
             if model.phase == .expanded && a.showEventProgress {
                 EventProgressBar(model: model)
@@ -67,56 +76,241 @@ struct IslandView: View {
         }
         .clipShape(shape)
         .overlay {
-            if !isHidden && a.borderOpacity > 0 {
-                shape.stroke(Color.white.opacity(a.borderOpacity), lineWidth: 1)
+            if !isHidden && colors.borderOpacity > 0 {
+                shape.stroke(model.palette.fill.opacity(colors.borderOpacity), lineWidth: 1)
             }
         }
         .shadow(
-            color: .black.opacity(a.shadow && !isHidden ? 0.35 : 0),
+            color: .black.opacity(colors.shadow && !isHidden ? 0.35 : 0),
             radius: isHidden ? 0 : 14, x: 0, y: 6
         )
         .opacity(isHidden && model.hiddenStyleFades ? 0 : 1)
         .modifier(PopEffect(trigger: model.config.motion.popOnEvent ? model.eventSerial : 0))
-        .foregroundStyle(Color(hex: a.textColor, fallback: .white))
+        .foregroundStyle(model.palette.text)
+        .padding(.top, model.currentTopOffset)
+    }
+
+    @ViewBuilder private var eventHeader: some View {
+        if model.phase == .expanded, let event = model.event {
+            EventHeader(model: model, event: event)
+                .frame(height: CGFloat(a.expandedHeaderHeight))
+                .padding(.horizontal, 18)
+                .id(model.eventSerial)
+                .transition(fade)
+        }
+    }
+
+    /// The workspace row; a floating island also carries the wing widgets
+    /// at its ends, since there is no strip beside the notch.
+    @ViewBuilder private var rowArea: some View {
+        if model.isFloating {
+            HStack(spacing: 10) {
+                if model.config.widgets.leftWing.lowercased() != "none" {
+                    WingView(model: model, widget: model.config.widgets.leftWing)
+                        .frame(maxWidth: model.leftWingWidth, alignment: .leading)
+                }
+                WorkspaceRow(model: model, ns: ns)
+                if model.config.widgets.rightWing.lowercased() != "none" {
+                    WingView(model: model, widget: model.config.widgets.rightWing)
+                        .frame(maxWidth: model.rightWingWidth, alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, model.contentPadding)
+        } else {
+            WorkspaceRow(model: model, ns: ns)
+        }
     }
 
     private var fade: AnyTransition {
-        let blur = model.config.motion.blurTransitions
-        return .asymmetric(
-            insertion: AnyTransition.modifier(
-                active: BlurFade(radius: blur ? 6 : 0, opacity: 0, scale: 0.92),
-                identity: BlurFade(radius: 0, opacity: 1, scale: 1)
-            ).animation(model.swiftUIAnimation?.delay(0.06)),
-            removal: .modifier(
-                active: BlurFade(radius: blur ? 4 : 0, opacity: 0, scale: 0.96),
-                identity: BlurFade(radius: 0, opacity: 1, scale: 1)
+        switch model.config.motion.contentTransition.lowercased() {
+        case "none":
+            return .identity
+        case "slide":
+            return .asymmetric(
+                insertion: AnyTransition.modifier(
+                    active: SlideFade(offset: 10, opacity: 0),
+                    identity: SlideFade(offset: 0, opacity: 1)
+                ).animation(model.swiftUIAnimation?.delay(0.06)),
+                removal: .modifier(
+                    active: SlideFade(offset: -6, opacity: 0),
+                    identity: SlideFade(offset: 0, opacity: 1)
+                )
             )
-        )
+        default:
+            let blur = model.config.motion.contentTransition.lowercased() != "fade"
+            return .asymmetric(
+                insertion: AnyTransition.modifier(
+                    active: BlurFade(radius: blur ? 6 : 0, opacity: 0, scale: blur ? 0.92 : 1),
+                    identity: BlurFade(radius: 0, opacity: 1, scale: 1)
+                ).animation(model.swiftUIAnimation?.delay(0.06)),
+                removal: .modifier(
+                    active: BlurFade(radius: blur ? 4 : 0, opacity: 0, scale: blur ? 0.96 : 1),
+                    identity: BlurFade(radius: 0, opacity: 1, scale: 1)
+                )
+            )
+        }
     }
 
-    /// Row at notch height: focused app on the left wing, active workspace on
-    /// the right wing. The middle is covered by the hardware notch.
+    /// Row at notch height with a widget on each wing. The middle is covered
+    /// by the hardware notch.
     private var topStrip: some View {
-        HStack(spacing: 6) {
-            if a.showFocusedApp, let app = model.focusedApp {
-                AppIconView(app: app, size: 16)
-                Text(app.name ?? "")
-                    .font(.system(size: CGFloat(a.fontSize) * 0.85, weight: .medium))
-                    .foregroundStyle(Color(hex: a.secondaryTextColor, fallback: .gray))
-                    .lineLimit(1)
-                    .frame(maxWidth: max(0, (model.currentSize.width - model.geometry.width) / 2 - 40),
-                           alignment: .leading)
-            }
+        let wingSpace = max(0, (model.currentSize.width - model.geometry.width) / 2 - 20)
+        return HStack(spacing: 6) {
+            WingView(model: model, widget: model.config.widgets.leftWing)
+                .frame(maxWidth: wingSpace, alignment: .leading)
             Spacer(minLength: model.geometry.width)
-            if let label = model.activeWorkspaceLabel {
+            WingView(model: model, widget: model.config.widgets.rightWing)
+                .frame(maxWidth: wingSpace, alignment: .trailing)
+        }
+        .padding(.horizontal, 14)
+    }
+}
+
+// MARK: - Background
+
+/// Solid color, macOS material or gradient behind the island content.
+struct IslandBackground: View {
+    @ObservedObject var model: IslandModel
+    /// Hidden in the notch: always plain black so it matches the hardware.
+    let solidBlack: Bool
+
+    var body: some View {
+        let p = model.palette
+        let c = p.colors
+        if solidBlack {
+            Color.black
+        } else {
+            switch c.backgroundStyle.lowercased() {
+            case "material":
+                ZStack {
+                    VisualEffectBackground(material: c.material, dark: p.isDark, withinWindow: model.isPreview)
+                    p.background.opacity(c.backgroundOpacity)
+                }
+            case "gradient":
+                Self.gradient(p)
+                    .opacity(c.backgroundOpacity)
+            default:
+                p.background.opacity(c.backgroundOpacity)
+            }
+        }
+    }
+
+    /// The two-color gradient; 0° runs left → right, 90° top → bottom.
+    static func gradient(_ p: IslandPalette) -> LinearGradient {
+        let radians = p.colors.gradientAngle * .pi / 180
+        let dx = cos(radians) / 2
+        let dy = sin(radians) / 2
+        return LinearGradient(colors: [p.background, p.gradientEnd],
+                              startPoint: UnitPoint(x: 0.5 - dx, y: 0.5 - dy),
+                              endPoint: UnitPoint(x: 0.5 + dx, y: 0.5 + dy))
+    }
+}
+
+struct VisualEffectBackground: NSViewRepresentable {
+    let material: String
+    let dark: Bool
+    let withinWindow: Bool
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.state = .active
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        configure(view)
+    }
+
+    private func configure(_ view: NSVisualEffectView) {
+        view.blendingMode = withinWindow ? .withinWindow : .behindWindow
+        switch material.lowercased() {
+        case "thin": view.material = .hudWindow
+        case "thick": view.material = .windowBackground
+        default: view.material = .popover
+        }
+        view.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    }
+}
+
+// MARK: - Wings
+
+/// One widget beside the notch (or at the end of a floating island).
+struct WingView: View {
+    @ObservedObject var model: IslandModel
+    let widget: String
+
+    var body: some View {
+        let size = CGFloat(model.config.appearance.fontSize)
+        let p = model.palette
+        switch widget.lowercased() {
+        case "app":
+            if let app = model.focusedApp {
+                HStack(spacing: 6) {
+                    AppIconView(app: app, size: 16)
+                    Text(app.name ?? "")
+                        .font(model.textFont(size: size * 0.85, weight: .medium))
+                        .foregroundStyle(p.secondary)
+                        .lineLimit(1)
+                }
+            }
+        case "workspace":
+            if let label = model.activeWorkspaceText {
                 Text(label)
-                    .font(.system(size: CGFloat(a.fontSize) * 0.9, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(hex: a.accentColor, fallback: .blue))
+                    .font(model.numberFont(size: size * 0.9, weight: .bold))
+                    .foregroundStyle(p.accent)
                     .lineLimit(1)
                     .contentTransition(.numericText())
             }
+        case "clock":
+            ClockText(template: ClockText.template(for: model.config.widgets.clockFormat),
+                      font: model.textFont(size: size * 0.85, weight: .semibold), color: p.secondary)
+        case "date":
+            ClockText(template: "MMMdE", font: model.textFont(size: size * 0.85, weight: .medium), color: p.secondary)
+        case "windows":
+            HStack(spacing: 4) {
+                Image(systemName: "macwindow")
+                    .font(.system(size: size * 0.8, weight: .semibold))
+                Text("\(model.activeWindowCount)")
+                    .font(model.numberFont(size: size * 0.85, weight: .semibold))
+                    .contentTransition(.numericText())
+            }
+            .foregroundStyle(p.secondary)
+        default:
+            EmptyView()
         }
-        .padding(.horizontal, 14)
+    }
+}
+
+/// Current time or date, refreshed every second.
+struct ClockText: View {
+    let template: String
+    let font: Font
+    let color: Color
+
+    static func template(for format: String) -> String {
+        switch format.lowercased() {
+        case "12h": return "hmm"
+        case "24hseconds": return "HHmmss"
+        default: return "HHmm"
+        }
+    }
+
+    private static func string(_ date: Date, template: String) -> String {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate(template)
+        return formatter.string(from: date)
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(Self.string(context.date, template: template))
+                .font(font)
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 }
 
@@ -128,8 +322,13 @@ struct WorkspaceRow: View {
 
     var body: some View {
         let a = model.config.appearance
+        let alignment = model.config.layout.rowAlignment.lowercased()
+        let inset: CGFloat = model.isFloating || alignment == "center" ? 0 : model.contentPadding
         HStack(spacing: CGFloat(a.pillSpacing)) {
-            ForEach(model.workspaces) { ws in
+            ForEach(Array(model.workspaces.enumerated()), id: \.element.id) { index, ws in
+                if alignment == "spread" && index > 0 {
+                    Spacer(minLength: 0)
+                }
                 if model.usesAppStyle {
                     WorkspaceGroup(model: model, ws: ws, ns: ns)
                 } else {
@@ -137,8 +336,9 @@ struct WorkspaceRow: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, 4)
+        .padding(.horizontal, inset)
+        .frame(maxWidth: .infinity, alignment: alignment == "leading" ? .leading : .center)
+        .padding(.bottom, model.isFloating ? 0 : 4)
     }
 }
 
@@ -151,17 +351,44 @@ private struct ActiveHighlight: View {
     let inactiveFill: Color
 
     var body: some View {
-        let accent = Color(hex: model.config.appearance.accentColor, fallback: .blue)
+        let colors = model.colors
+        let accent = model.palette.accent
         let isActive = ws.id == model.activeWorkspaceKey
         let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
+        let glow = accent.opacity(colors.activeGlow ? 0.55 : 0)
         ZStack {
-            if isActive {
-                shape
-                    .fill(accent.opacity(model.usesAppStyle ? 0.32 : 1))
-                    .shadow(color: accent.opacity(0.55), radius: 6, x: 0, y: 0)
-                    .matchedGeometryEffect(id: "active-workspace", in: ns)
-            } else {
+            if !isActive || model.activeStyle != .fill {
                 shape.fill(inactiveFill)
+            }
+            if isActive {
+                switch model.activeStyle {
+                case .fill:
+                    shape
+                        .fill(accent.opacity(model.usesAppStyle ? 0.32 : 1))
+                        .shadow(color: glow, radius: 6, x: 0, y: 0)
+                        .matchedGeometryEffect(id: "active-workspace", in: ns)
+                case .outline:
+                    shape
+                        .stroke(accent, lineWidth: 1.5)
+                        .shadow(color: glow, radius: 6, x: 0, y: 0)
+                        .matchedGeometryEffect(id: "active-workspace", in: ns)
+                case .underline:
+                    Capsule()
+                        .fill(accent)
+                        .frame(height: 2)
+                        .padding(.horizontal, 6)
+                        .shadow(color: glow, radius: 4, x: 0, y: 0)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .matchedGeometryEffect(id: "active-workspace", in: ns)
+                case .dot:
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 4, height: 4)
+                        .shadow(color: glow, radius: 4, x: 0, y: 0)
+                        .offset(y: 4)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .matchedGeometryEffect(id: "active-workspace", in: ns)
+                }
             }
             if isTarget && !isActive {
                 shape.stroke(accent, lineWidth: 1.5)
@@ -180,15 +407,17 @@ private struct WorkspacePill: View {
         let a = model.config.appearance
         let isActive = ws.id == model.activeWorkspaceKey
         let isTarget = model.phase == .expanded && model.event?.targetWorkspaceKey == ws.id
+        let label = model.label(for: ws)
+        let activeColor = model.activeStyle == .fill ? model.palette.activeText : model.palette.accent
         ZStack {
             ActiveHighlight(model: model, ws: ws, ns: ns, shape: AnyShape(Capsule()),
-                            inactiveFill: Color.white.opacity(ws.windowCount > 0 ? 0.14 : 0.06))
-            Text(ws.label)
+                            inactiveFill: model.palette.fill.opacity(ws.windowCount > 0 ? 0.14 : 0.06))
+            Text(label)
                 .font(model.pillSwiftUIFont)
                 .lineLimit(1)
-                .foregroundStyle(isActive ? Color.white : Color.white.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
+                .foregroundStyle(isActive ? activeColor : model.palette.text.opacity(ws.windowCount > 0 ? 0.9 : 0.45))
         }
-        .frame(width: model.pillWidth(for: ws.label), height: CGFloat(a.pillSize))
+        .frame(width: model.pillWidth(for: label), height: CGFloat(a.pillSize))
         .scaleEffect(isTarget ? 1.08 : 1)
     }
 }
@@ -211,11 +440,9 @@ private struct WorkspaceGroup: View {
         let isEmpty = ws.apps.isEmpty && ws.windowCount == 0
 
         HStack(spacing: IslandModel.appIconGap) {
-            Text(ws.label)
-                .font(.system(size: CGFloat(a.fontSize) * 1.05,
-                              weight: isActive ? .heavy : .semibold,
-                              design: .rounded))
-                .foregroundStyle(Color.white.opacity(isActive ? 1 : (isEmpty ? 0.35 : 0.6)))
+            Text(model.label(for: ws))
+                .font(model.numberFont(size: CGFloat(a.fontSize) * 1.05, weight: isActive ? .heavy : .semibold))
+                .foregroundStyle(model.palette.text.opacity(isActive ? 1 : (isEmpty ? 0.35 : 0.6)))
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.trailing, shown.isEmpty ? 0 : 2)
@@ -232,13 +459,13 @@ private struct WorkspaceGroup: View {
                     }
                     .overlay(alignment: .bottom) {
                         if model.multiWindowStyle == .dots && app.windowCount > 1 {
-                            WindowCountDots(count: app.windowCount, iconSize: iconSize)
+                            WindowCountDots(count: app.windowCount, iconSize: iconSize, color: model.palette.fill)
                                 .offset(y: max(3, iconSize * 0.2))
                         }
                     }
                     .overlay(alignment: .topTrailing) {
                         if let badge = model.badge(for: app) {
-                            BadgeView(label: badge, iconSize: iconSize)
+                            BadgeView(label: badge, iconSize: iconSize, palette: model.palette)
                                 .offset(x: iconSize * 0.18, y: -iconSize * 0.18)
                                 .transition(.scale.combined(with: .opacity))
                         }
@@ -247,8 +474,8 @@ private struct WorkspaceGroup: View {
             }
             if hidden > 0 {
                 Text("+\(hidden)")
-                    .font(.system(size: CGFloat(a.fontSize) * 0.8, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.6))
+                    .font(model.numberFont(size: CGFloat(a.fontSize) * 0.8, weight: .semibold))
+                    .foregroundStyle(model.palette.text.opacity(0.6))
                     .fixedSize()
             }
         }
@@ -257,7 +484,7 @@ private struct WorkspaceGroup: View {
         .background {
             ActiveHighlight(model: model, ws: ws, ns: ns,
                             shape: AnyShape(RoundedRectangle(cornerRadius: (iconSize + 8) / 2.6, style: .continuous)),
-                            inactiveFill: Color.white.opacity(isEmpty ? 0 : 0.06))
+                            inactiveFill: model.palette.fill.opacity(isEmpty ? 0 : 0.06))
         }
         .scaleEffect(isTarget ? 1.06 : 1)
     }
@@ -287,12 +514,13 @@ private struct FocusRing: View {
 private struct WindowCountDots: View {
     let count: Int
     let iconSize: CGFloat
+    let color: Color
 
     var body: some View {
         let dot = max(2.5, iconSize * 0.14)
         HStack(spacing: dot * 0.7) {
             ForEach(0..<min(count, 3), id: \.self) { _ in
-                Circle().fill(Color.white.opacity(0.75)).frame(width: dot, height: dot)
+                Circle().fill(color.opacity(0.75)).frame(width: dot, height: dot)
             }
         }
     }
@@ -303,16 +531,17 @@ private struct WindowCountDots: View {
 private struct BadgeView: View {
     let label: String
     let iconSize: CGFloat
+    let palette: IslandPalette
 
     var body: some View {
         let short = label.count <= 2 && Int(label) != nil
         let size = max(8, iconSize * (short ? 0.55 : 0.4))
         ZStack {
-            Capsule().fill(Color(red: 1, green: 0.23, blue: 0.19))
+            Capsule().fill(palette.badge)
             if short {
                 Text(label)
                     .font(.system(size: size * 0.68, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(palette.badgeText)
                     .padding(.horizontal, size * 0.22)
             }
         }
@@ -331,22 +560,27 @@ struct EventHeader: View {
 
     var body: some View {
         let a = model.config.appearance
-        let secondary = Color(hex: a.secondaryTextColor, fallback: .gray)
+        let w = model.config.widgets
+        let secondary = model.palette.secondary
         HStack(spacing: 12) {
-            icon
+            if w.eventIcon {
+                icon
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: CGFloat(a.fontSize) + 2, weight: .semibold))
+                    .font(model.textFont(size: CGFloat(a.fontSize) + 2, weight: .semibold))
                     .lineLimit(1)
-                if let subtitle, !subtitle.isEmpty {
+                if w.eventSubtitle, let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: CGFloat(a.fontSize) * 0.85))
+                        .font(model.textFont(size: CGFloat(a.fontSize) * 0.85, weight: .regular))
                         .foregroundStyle(secondary)
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 8)
-            FromToView(model: model, from: from, to: to)
+            if w.eventFromTo {
+                FromToView(model: model, from: from, to: to)
+            }
         }
     }
 
@@ -364,7 +598,7 @@ struct EventHeader: View {
     private var title: String {
         switch event {
         case .workspaceSwitch(_, let to, _):
-            return "워크스페이스 \(to.label)"
+            return "워크스페이스 \(model.label(for: to))"
         case .windowMove(let app, _, _, _, let count):
             let name = app?.name ?? "창"
             return count > 1 ? "\(name) 외 \(count - 1)개 창 이동" : "\(name) 이동"
@@ -403,16 +637,16 @@ struct FromToView: View {
 
     var body: some View {
         let a = model.config.appearance
-        let accent = Color(hex: a.accentColor, fallback: .blue)
+        let accent = model.palette.accent
         HStack(spacing: 6) {
             if let from {
-                pill(from.label, fill: Color.white.opacity(0.14))
+                pill(model.label(for: from), fill: model.palette.fill.opacity(0.14), text: model.palette.text)
                 Image(systemName: "arrow.right")
                     .font(.system(size: CGFloat(a.fontSize) * 0.85, weight: .bold))
                     .opacity(0.7)
                     .offset(x: arrived ? 0 : -6)
             }
-            pill(to.label, fill: accent)
+            pill(model.label(for: to), fill: accent, text: model.palette.activeText)
                 .scaleEffect(arrived ? 1 : 0.6)
                 .opacity(arrived ? 1 : 0)
         }
@@ -423,9 +657,10 @@ struct FromToView: View {
         }
     }
 
-    private func pill(_ label: String, fill: Color) -> some View {
+    private func pill(_ label: String, fill: Color, text: Color) -> some View {
         Text(label)
             .font(model.pillSwiftUIFont)
+            .foregroundStyle(text)
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(minWidth: CGFloat(model.config.appearance.pillSize),
@@ -483,6 +718,18 @@ struct BlurFade: ViewModifier {
     }
 }
 
+/// Fade + small vertical slide used for the "slide" content transition.
+struct SlideFade: ViewModifier {
+    let offset: CGFloat
+    let opacity: Double
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: offset)
+            .opacity(opacity)
+    }
+}
+
 /// A short scale "pop" each time `trigger` changes.
 struct PopEffect: ViewModifier {
     let trigger: Int
@@ -506,11 +753,11 @@ struct EventProgressBar: View {
     @State private var remaining: CGFloat = 1
 
     var body: some View {
-        let accent = Color(hex: model.config.appearance.accentColor, fallback: .blue)
+        let color = model.palette.progress
         let duration = max(model.config.behavior.eventDurationMs, 100) / 1000
         GeometryReader { proxy in
             Capsule()
-                .fill(accent.opacity(0.85))
+                .fill(color.opacity(0.85))
                 .frame(width: proxy.size.width * remaining, height: 2)
                 .frame(maxWidth: .infinity)
         }

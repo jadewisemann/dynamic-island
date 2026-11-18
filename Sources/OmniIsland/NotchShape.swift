@@ -7,28 +7,38 @@ import SwiftUI
 struct NotchShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
+    /// Rounded (convex) top corners, used by the floating island. When it is
+    /// above zero the concave shoulders are not drawn.
+    var topConvexRadius: CGFloat = 0
 
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(topRadius, bottomRadius) }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(topRadius, bottomRadius), topConvexRadius) }
         set {
-            topRadius = newValue.first
-            bottomRadius = newValue.second
+            topRadius = newValue.first.first
+            bottomRadius = newValue.first.second
+            topConvexRadius = newValue.second
         }
     }
 
     func path(in rect: CGRect) -> Path {
         let w = rect.width
         let h = rect.height
-        let top = max(0, min(topRadius, w / 4, h / 2))
-        let bottom = max(0, min(bottomRadius, (w - 2 * top) / 2, h - top))
+        let convex = max(0, min(topConvexRadius, w / 2, h / 2))
+        let top = convex > 0 ? 0 : max(0, min(topRadius, w / 4, h / 2))
+        let bottom = max(0, min(bottomRadius, (w - 2 * top) / 2, h - top - convex))
 
         var p = Path()
-        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        // Left shoulder: curves inward from the top edge.
-        p.addQuadCurve(
-            to: CGPoint(x: rect.minX + top, y: rect.minY + top),
-            control: CGPoint(x: rect.minX + top, y: rect.minY)
-        )
+        if convex > 0 {
+            // The rounded top corners are drawn at the end of the path.
+            p.move(to: CGPoint(x: rect.minX, y: rect.minY + convex))
+        } else {
+            p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            // Left shoulder: curves inward from the top edge.
+            p.addQuadCurve(
+                to: CGPoint(x: rect.minX + top, y: rect.minY + top),
+                control: CGPoint(x: rect.minX + top, y: rect.minY)
+            )
+        }
         // Left side down to the bottom-left corner.
         p.addLine(to: CGPoint(x: rect.minX + top, y: rect.minY + h - bottom))
         p.addArc(
@@ -43,12 +53,28 @@ struct NotchShape: Shape {
             tangent2End: CGPoint(x: rect.maxX - top, y: rect.minY + h - bottom),
             radius: bottom
         )
-        // Right side up to the right shoulder.
-        p.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
-        p.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY),
-            control: CGPoint(x: rect.maxX - top, y: rect.minY)
-        )
+        if convex > 0 {
+            // Right side up, then the rounded top corners.
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + convex))
+            p.addArc(
+                tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+                tangent2End: CGPoint(x: rect.maxX - convex, y: rect.minY),
+                radius: convex
+            )
+            p.addLine(to: CGPoint(x: rect.minX + convex, y: rect.minY))
+            p.addArc(
+                tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+                tangent2End: CGPoint(x: rect.minX, y: rect.minY + convex),
+                radius: convex
+            )
+        } else {
+            // Right side up to the right shoulder.
+            p.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
+            p.addQuadCurve(
+                to: CGPoint(x: rect.maxX, y: rect.minY),
+                control: CGPoint(x: rect.maxX - top, y: rect.minY)
+            )
+        }
         p.closeSubpath()
         return p
     }
