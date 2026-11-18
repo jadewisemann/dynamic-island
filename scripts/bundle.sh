@@ -70,6 +70,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>아일랜드에 다음 일정을 보여 주고 일정이 시작되기 전에 알려 주려고 캘린더를 읽습니다.</string>
+  <key>NSCalendarsUsageDescription</key><string>아일랜드에 다음 일정을 보여 주고 일정이 시작되기 전에 알려 주려고 캘린더를 읽습니다.</string>
 </dict>
 </plist>
 PLIST

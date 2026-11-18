@@ -15,6 +15,8 @@ final class SettingsModel: ObservableObject {
     }
     @Published var connectionStatus = ""
     @Published var accessibilityGranted = false
+    @Published var calendarAccess: CalendarProvider.Access = CalendarProvider.currentAccess()
+    @Published var notificationDatabaseStatus: NotificationDatabaseWatcher.Status = .off
     @Published var configError: String?
     /// Whether macOS is in dark mode right now.
     @Published var systemIsDark = true {
@@ -35,6 +37,11 @@ final class SettingsModel: ObservableObject {
     var onPreview: (() -> Void)?
     var onOpenFile: (() -> Void)?
     var onOpenAccessibility: (() -> Void)?
+    var onPreviewNotification: (() -> Void)?
+    var onSendTestNotification: (() -> Void)?
+    var onRecordNotificationDiagnostics: (() -> Void)?
+    var onOpenCalendarPrivacy: (() -> Void)?
+    var onOpenFullDiskAccess: (() -> Void)?
 
     private var saveWork: DispatchWorkItem?
     private var suppressSave = false
@@ -227,6 +234,8 @@ struct SettingsView: View {
                     .tabItem { Label("레이아웃", systemImage: "rectangle.3.group") }
                 WidgetSettings(model: model)
                     .tabItem { Label("표시 요소", systemImage: "square.grid.2x2") }
+                NotificationSettings(model: model)
+                    .tabItem { Label("알림·일정", systemImage: "bell.badge") }
                 AnimationSettings(model: model)
                     .tabItem { Label("애니메이션", systemImage: "wand.and.stars") }
                 ConnectionSettings(model: model)
@@ -249,7 +258,7 @@ struct SettingsView: View {
             }
             .padding(12)
         }
-        .frame(width: 640, height: 820)
+        .frame(width: 640, height: 850)
     }
 }
 
@@ -269,7 +278,7 @@ private struct PreviewPane: View {
                 .frame(height: island.geometry.height)
             IslandView(model: island)
         }
-        .frame(height: 180)
+        .frame(height: 210)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(alignment: .bottomLeading) {
             if model.followsSystem {
@@ -285,10 +294,12 @@ private struct PreviewPane: View {
                 Text("숨김").tag(IslandPhase.hidden)
                 Text("워크스페이스").tag(IslandPhase.compact)
                 Text("이동 알림").tag(IslandPhase.expanded)
+                Text("알림").tag(IslandPhase.notification)
+                Text("대시보드").tag(IslandPhase.dashboard)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 260)
+            .frame(width: 400)
             .padding(8)
         }
     }
@@ -752,6 +763,24 @@ private struct WidgetSettings: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Picker("한쪽 칸 너비", selection: $model.draft.widgets.panelUnits) {
+                    Text("1칸 (정사각형)").tag(1.0)
+                    Text("2칸").tag(2.0)
+                    Text("3칸").tag(3.0)
+                }
+                .pickerStyle(.segmented)
+                PanelSlotEditor(model: model)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            } header: {
+                Text("좌우 위젯 칸")
+            } footer: {
+                Text("트리거 키를 눌러 워크스페이스 줄이 나타날 때 아일랜드 양옆에 붙습니다. 칸보다 위젯이 적으면 남는 너비를 나눠 쓰고, 2칸 이상이면 위젯이 넓은 모양으로 바뀝니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("워크스페이스 줄") {
                 Picker("표시 방식", selection: $model.draft.appearance.workspaceStyle) {
                     Text("번호와 앱 아이콘").tag("apps")
@@ -802,6 +831,7 @@ private struct WidgetSettings: View {
     private var usesClock: Bool {
         let w = model.draft.widgets
         return w.leftWing.lowercased() == "clock" || w.rightWing.lowercased() == "clock"
+            || (w.leftPanel + w.rightPanel).contains("clock")
     }
 
     private func wingPicker(_ title: String, selection: Binding<String>) -> some View {
@@ -811,8 +841,302 @@ private struct WidgetSettings: View {
             Text("시계").tag("clock")
             Text("날짜").tag("date")
             Text("창 개수").tag("windows")
+            Text("다음 일정").tag("nextEvent")
+            Text("놓친 알림 수").tag("notifications")
             Text("없음").tag("none")
         }
+    }
+}
+
+// MARK: - Widget slot editor
+
+/// The widgets that can go into a side panel slot.
+enum PanelWidgetKind: String, CaseIterable, Identifiable {
+    case clock, calendar, nextEvent, events, notifications
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .clock: return "시계"
+        case .calendar: return "달력"
+        case .nextEvent: return "다음 일정"
+        case .events: return "오늘 일정"
+        case .notifications: return "최근 알림"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .clock: return "clock"
+        case .calendar: return "calendar"
+        case .nextEvent: return "calendar.badge.clock"
+        case .events: return "list.bullet.rectangle"
+        case .notifications: return "bell.badge"
+        }
+    }
+
+    static func named(_ name: String) -> PanelWidgetKind? {
+        allCases.first { $0.rawValue.lowercased() == name.lowercased() }
+    }
+}
+
+/// A sketch of the island: slots on the left, the workspace row, slots on
+/// the right. Click a slot to choose its widget.
+private struct PanelSlotEditor: View {
+    @ObservedObject var model: SettingsModel
+
+    private var slots: Int { min(max(Int(model.draft.widgets.panelUnits.rounded()), 1), 3) }
+
+    var body: some View {
+        let w = model.draft.widgets
+        let count = max(slots, w.leftPanel.count, w.rightPanel.count)
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                side(\.leftPanel, count: count)
+                Text("워크스페이스 줄")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 130, height: 58)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                side(\.rightPanel, count: count)
+            }
+            Text("칸을 눌러 위젯을 고르거나 비웁니다. 한쪽을 모두 비우면 그쪽에는 칸이 생기지 않습니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func side(_ key: WritableKeyPath<IslandConfig.Widgets, [String]>, count: Int) -> some View {
+        HStack(spacing: 4) {
+            ForEach(0..<count, id: \.self) { index in
+                slot(key, index)
+            }
+        }
+    }
+
+    private func slot(_ key: WritableKeyPath<IslandConfig.Widgets, [String]>, _ index: Int) -> some View {
+        let items = model.draft.widgets[keyPath: key]
+        let current = index < items.count ? PanelWidgetKind.named(items[index]) : nil
+        return Menu {
+            ForEach(PanelWidgetKind.allCases) { kind in
+                Button {
+                    set(key, index, kind.rawValue)
+                } label: {
+                    Label(kind.title, systemImage: kind.symbol)
+                }
+            }
+            if current != nil {
+                Divider()
+                Button("비우기", role: .destructive) { set(key, index, "") }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: current?.symbol ?? "plus")
+                    .font(.system(size: 16, weight: .medium))
+                Text(current?.title ?? "비어 있음")
+                    .font(.system(size: 10))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(current == nil ? Color.secondary : Color.primary)
+            .frame(width: 58, height: 58)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(current == nil ? Color.clear : Color.accentColor.opacity(0.14))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(current == nil ? Color.secondary.opacity(0.4) : Color.accentColor,
+                                  style: StrokeStyle(lineWidth: 1, dash: current == nil ? [4, 3] : []))
+            )
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func set(_ key: WritableKeyPath<IslandConfig.Widgets, [String]>, _ index: Int, _ value: String) {
+        var items = model.draft.widgets[keyPath: key]
+        while items.count <= index { items.append("") }
+        items[index] = value
+        model.draft.widgets[keyPath: key] = items.filter { !$0.isEmpty }
+    }
+}
+
+// MARK: - Notifications tab
+
+private struct NotificationSettings: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("macOS 알림을 아일랜드에 보여 주기", isOn: $model.draft.notifications.enabled)
+                if model.draft.notifications.enabled && !model.accessibilityGranted {
+                    HStack {
+                        Text("알림을 읽으려면 손쉬운 사용 권한이 필요합니다.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("권한 허용…") { model.onOpenAccessibility?() }
+                    }
+                }
+                SliderRow(title: "표시 시간", value: $model.draft.notifications.durationMs,
+                          range: 1500...10000, step: 250, unit: "ms")
+                Picker("보여 줄 내용", selection: $model.draft.notifications.contentMode) {
+                    Text("제목과 본문").tag("full")
+                    Text("제목만").tag("title")
+                    Text("앱 이름만").tag("app")
+                }
+                SliderRow(title: "같은 앱 알림 합치기", value: $model.draft.notifications.mergeWindowMs,
+                          range: 0...10000, step: 500, unit: "ms")
+                Toggle("알림 데이터베이스도 읽기", isOn: $model.draft.notifications.readDatabase)
+                if model.draft.notifications.enabled && model.draft.notifications.readDatabase {
+                    HStack {
+                        Text("상태: \(model.notificationDatabaseStatus.label)")
+                            .font(.caption)
+                            .foregroundStyle(model.notificationDatabaseStatus == .running ? Color.secondary : Color.orange)
+                        Spacer()
+                        if model.notificationDatabaseStatus == .needsFullDiskAccess {
+                            Button("권한 허용…") { model.onOpenFullDiskAccess?() }
+                        }
+                    }
+                }
+                Toggle("macOS 기본 배너 닫기", isOn: $model.draft.notifications.dismissSystemBanner)
+                Toggle("놓친 알림을 노치 옆에 표시", isOn: $model.draft.notifications.keepIndicator)
+                if model.draft.notifications.keepIndicator {
+                    SliderRow(title: "표시 유지 시간", value: $model.draft.notifications.indicatorTimeoutMin,
+                              range: 1...240, step: 1, unit: "분")
+                }
+            } header: {
+                Text("알림 카드")
+            } footer: {
+                Text("macOS 알림 배너에 보이는 내용을 손쉬운 사용 API로 읽어 옵니다. 데이터베이스 읽기를 켜고 전체 디스크 접근 권한을 주면 배너가 뜨지 않는 알림(집중 모드, 알림 스타일 \"없음\")도 1~2초 늦게 보여 줍니다. 두 경로로 들어온 같은 알림은 한 번만 보여 줍니다. 기본 배너를 닫는 옵션을 켜도 배너가 잠깐 보였다가 사라집니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("앱 필터") {
+                Picker("대상", selection: $model.draft.notifications.filterMode) {
+                    Text("모든 앱").tag("all")
+                    Text("목록의 앱만").tag("allow")
+                    Text("목록의 앱 빼고").tag("block")
+                }
+                if model.draft.notifications.filterMode != "all" {
+                    TextField("앱 목록", text: appsText, prompt: Text("Slack, 메시지, com.apple.mail"))
+                    Text("앱 이름이나 번들 ID를 쉼표로 구분해서 적습니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Toggle("캘린더 사용", isOn: $model.draft.calendar.enabled)
+                if model.draft.calendar.enabled {
+                    switch model.calendarAccess {
+                    case .granted:
+                        EmptyView()
+                    case .notDetermined:
+                        Text("곧 캘린더 접근 권한을 묻는 창이 나타납니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    case .denied:
+                        HStack {
+                            Text("캘린더 접근이 거부되어 있습니다.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Button("시스템 설정 열기…") { model.onOpenCalendarPrivacy?() }
+                        }
+                    }
+                    TextField("사용할 캘린더", text: calendarsText, prompt: Text("비워 두면 전체"))
+                    Toggle("일정 시작 전에 알리기", isOn: $model.draft.calendar.showAlerts)
+                    if model.draft.calendar.showAlerts {
+                        TextField("알림 시점 (분 전)", text: alertMinutesText, prompt: Text("5, 0"))
+                    }
+                    Toggle("종일 일정 포함", isOn: $model.draft.calendar.includeAllDay)
+                }
+            } header: {
+                Text("캘린더")
+            } footer: {
+                Text("다음 일정은 표시 요소 탭에서 노치 양옆 위젯을 \"다음 일정\"으로 바꾸면 보입니다. 거절한 일정은 표시하지 않습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("대시보드 사용", isOn: $model.draft.dashboard.enabled)
+                if model.draft.dashboard.enabled {
+                    SliderRow(title: "추가로 누르고 있는 시간", value: $model.draft.dashboard.holdMs,
+                              range: 200...3000, step: 100, unit: "ms")
+                    Toggle("큰 시계", isOn: itemBinding("clock"))
+                    Toggle("오늘 남은 일정", isOn: itemBinding("events"))
+                    Toggle("최근 알림", isOn: itemBinding("notifications"))
+                }
+            } header: {
+                Text("대시보드")
+            } footer: {
+                Text("트리거 키를 눌러 워크스페이스 줄이 나타난 뒤 계속 누르고 있으면 한 단계 더 펼쳐집니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                HStack {
+                    Button("알림 카드 미리보기") {
+                        model.saveNow()
+                        model.onPreviewNotification?()
+                    }
+                    Button("테스트 알림 보내기") { model.onSendTestNotification?() }
+                    Button("배너 구조 기록 (1분)") { model.onRecordNotificationDiagnostics?() }
+                }
+            } header: {
+                Text("확인")
+            } footer: {
+                Text("테스트 알림이 아일랜드에 보이지 않으면 \"배너 구조 기록\"을 누르고 1분 뒤 Finder에 나타나는 로그 파일을 보내 주세요. macOS 버전에 맞게 판독 코드를 고칠 때 씁니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private static func split(_ text: String) -> [String] {
+        text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    private var appsText: Binding<String> {
+        Binding(
+            get: { model.draft.notifications.apps.joined(separator: ", ") },
+            set: { model.draft.notifications.apps = Self.split($0) }
+        )
+    }
+
+    private var calendarsText: Binding<String> {
+        Binding(
+            get: { model.draft.calendar.calendars.joined(separator: ", ") },
+            set: { model.draft.calendar.calendars = Self.split($0) }
+        )
+    }
+
+    private var alertMinutesText: Binding<String> {
+        Binding(
+            get: { model.draft.calendar.alertMinutes.map { String(Int($0)) }.joined(separator: ", ") },
+            set: { model.draft.calendar.alertMinutes = Self.split($0).compactMap(Double.init) }
+        )
+    }
+
+    private func itemBinding(_ item: String) -> Binding<Bool> {
+        Binding(
+            get: { model.draft.dashboard.items.contains(item) },
+            set: { on in
+                let order = ["clock", "events", "notifications"]
+                var items = model.draft.dashboard.items.filter { $0 != item }
+                if on { items.append(item) }
+                model.draft.dashboard.items = order.filter(items.contains)
+            }
+        )
     }
 }
 

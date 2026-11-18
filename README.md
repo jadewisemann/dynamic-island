@@ -130,10 +130,22 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `layout.widthMode` / `fixedWidth` | `"auto"` / `420` | `fixed`이면 아일랜드가 적어도 `fixedWidth`만큼 넓어집니다. |
 | `layout.rowAlignment` / `contentPadding` | `"center"` / `20` | 워크스페이스 줄 정렬(`center`, `leading`, `spread`)과 안쪽 여백입니다. |
 | `layout.eventPlacement` | `"below"` | 이동 알림을 워크스페이스 줄 아래(`below`), 위(`above`), 또는 줄 대신(`replace`) 보여 줍니다. |
-| `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `none` 중 하나입니다. |
+| `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `nextEvent`(다음 일정), `notifications`(놓친 알림 수), `none` 중 하나입니다. |
+| `widgets.leftPanel` / `rightPanel` | `["clock"]` / `["calendar"]` | 워크스페이스 줄이 보일 때 아일랜드 양옆에 붙는 정사각형 위젯 칸입니다. `clock`, `calendar`, `nextEvent`, `events`, `notifications`를 순서대로 적고, 비우면 그쪽 칸이 없습니다. |
+| `widgets.panelUnits` | `1` | 한쪽 칸의 너비를 정사각형 1~3칸으로 정합니다. 2칸 이상이면 위젯이 넓은 모양(큰 시계, 2주 달력, 일정 목록)으로 바뀝니다. |
 | `widgets.workspaceLabel` | `"name"` | 워크스페이스를 OmniWM 표시 이름(`name`), 번호(`number`), 번호와 이름(`both`)으로 보여 줍니다. |
 | `widgets.eventIcon` / `eventSubtitle` / `eventFromTo` | `true` | 이동 알림 카드의 아이콘, 부제목, "출발 → 도착" 표시를 켜고 끕니다. |
 | `widgets.clockFormat` | `"24h"` | `24h`, `12h`, `24hSeconds` 중 하나입니다. |
+| `notifications.enabled` | `true` | macOS 알림 배너를 읽어 아일랜드에 카드로 보여 줍니다. 손쉬운 사용 권한이 필요합니다. |
+| `notifications.readDatabase` | `true` | macOS 알림 데이터베이스도 읽습니다. 전체 디스크 접근 권한이 있어야 동작하며, 배너를 꺼 둔 앱의 알림도 볼 수 있습니다. |
+| `notifications.durationMs` / `contentMode` | `4000` / `"full"` | 카드 표시 시간과 보여 줄 내용(`full`, `title`, `app`)입니다. |
+| `notifications.filterMode` / `apps` | `"all"` / `[]` | `allow`는 `apps`에 적은 앱만, `block`은 그 앱을 빼고 보여 줍니다. 앱 이름이나 번들 ID를 적습니다. |
+| `notifications.dismissSystemBanner` | `false` | 내용을 읽은 직후 macOS 기본 배너를 닫습니다. |
+| `notifications.keepIndicator` / `indicatorTimeoutMin` | `true` / `30` | 알림 카드가 접힌 뒤에도 노치 옆에 놓친 알림 아이콘과 개수를 남깁니다. 트리거 키를 누르면 사라집니다. |
+| `notifications.mergeWindowMs` | `3000` | 같은 앱에서 이 시간 안에 온 알림은 한 장으로 합칩니다. |
+| `calendar.enabled` / `calendars` | `false` / `[]` | 캘린더 일정을 읽습니다. 켜면 캘린더 접근 권한을 묻습니다. 비워 두면 모든 캘린더를 씁니다. |
+| `calendar.alertMinutes` / `showAlerts` / `includeAllDay` | `[5, 0]` / `true` / `false` | 일정 시작 몇 분 전에 카드를 띄울지 정합니다. |
+| `dashboard.enabled` / `holdMs` / `items` | `false` / `800` / `["clock", "events", "notifications"]` | 트리거 키를 더 오래 누르면 큰 시계, 오늘 남은 일정, 최근 알림을 보여 줍니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
 | `animation.durationMs` | `380` | `spring`이 아닌 스타일의 재생 시간입니다. |
@@ -151,6 +163,17 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
   "appearance": { "accentColor": "#FF9F0A", "expandedWidth": 440 },
 }
 ```
+
+## 알림과 일정
+
+macOS에는 다른 앱의 알림을 읽는 공식 API가 없어서, 두 가지 경로를 함께 씁니다.
+
+- **알림 배너 관찰**: 알림 배너를 그리는 `NotificationCenter` 프로세스를 손쉬운 사용 API로 관찰해서, 배너가 뜨는 순간 앱 이름, 제목, 본문을 읽습니다. 추가 권한이 필요 없지만, 배너가 뜨지 않는 알림은 읽을 수 없습니다.
+- **알림 데이터베이스**: macOS가 알림을 기록하는 데이터베이스(`~/Library/Group Containers/group.com.apple.usernoted/db2/db`)를 1.5초마다 읽습니다. 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한에서 OmniIsland를 켜야 동작합니다. 형식이 공개되어 있지 않아서 macOS 업데이트 후 동작하지 않을 수 있습니다.
+- 두 경로가 같은 알림을 보면 20초 안의 같은 내용은 한 번만 보여 줍니다.
+- 배너 판독이 맞지 않으면 메뉴 막대 아이콘 → 알림 → "알림 배너 구조 기록 (1분)"을 누릅니다. 테스트 알림을 보내고 1분 동안 배너 구조를 `~/Library/Logs/OmniIsland/notification-banners.log`에 남긴 뒤 Finder로 보여 줍니다.
+
+일정은 EventKit으로 읽습니다. 설정 창의 "알림·일정" 탭에서 캘린더를 켜면 macOS가 캘린더 접근 권한을 묻습니다. 노치 양옆 위젯을 "다음 일정"으로 바꾸면 다음 일정과 남은 시간이 보이고, 일정이 시작되기 전에는 알림 카드가 펼쳐집니다.
 
 ## 문제 해결
 

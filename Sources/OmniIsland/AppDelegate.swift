@@ -23,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let client = OmniWMClient()
     private let modifiers = ModifierMonitor()
     private let badgeMonitor = DockBadgeMonitor()
+    private let notificationWatcher = NotificationWatcher()
+    private let calendarProvider = CalendarProvider()
+    private let notificationDatabase = NotificationDatabaseWatcher()
+    private let deduplicator = NotificationDeduplicator()
     private var windowController: IslandWindowController?
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
@@ -80,6 +84,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.model.setBadges(labels)
         }
         configureBadges(configStore.config)
+
+        notificationWatcher.onNotification = { [weak self] notification in
+            self?.receive(notification)
+        }
+        notificationDatabase.onNotification = { [weak self] notification in
+            self?.receive(notification)
+        }
+        notificationDatabase.onStatus = { [weak self] status in
+            self?.settingsModel?.notificationDatabaseStatus = status
+        }
+        calendarProvider.onChange = { [weak self] events in
+            self?.model.setCalendarEvents(events)
+            self?.windowController?.reposition()
+        }
+        calendarProvider.onAlert = { [weak self] event, minutes in
+            guard let self, self.configStore.config.calendar.showAlerts else { return }
+            self.model.present(notification: event.alertNotification(minutesBefore: minutes))
+        }
+        calendarProvider.onAccessChange = { [weak self] access in
+            self?.settingsModel?.calendarAccess = access
+        }
+        configureWidgets(configStore.config)
         modifiers.start(promptForAccessibility: !isDemo)
 
         rebuildStatusItem()
@@ -139,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.update(from: tracker)
         modifiers.configure(modifier: config.trigger.modifier, exactMatch: config.trigger.exactMatch)
         configureBadges(config)
+        configureWidgets(config)
         windowController?.reposition()
         if previous.omniwmctlPath != config.omniwmctlPath || previous.socketPath != config.socketPath {
             if !isDemo {
@@ -157,6 +184,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureBadges(_ config: IslandConfig) {
         let wanted = config.appearance.showBadges && config.appearance.workspaceStyle.lowercased() != "pills"
         badgeMonitor.configure(enabled: wanted && !isDemo, intervalMs: config.behavior.badgeIntervalMs)
+    }
+
+    private func configureWidgets(_ config: IslandConfig) {
+        notificationWatcher.configure(enabled: config.notifications.enabled && !isDemo,
+                                      dismissSystemBanner: config.notifications.dismissSystemBanner)
+        calendarProvider.configure(enabled: config.calendar.enabled,
+                                   calendars: config.calendar.calendars,
+                                   alertMinutes: config.calendar.alertMinutes.map { Int($0.rounded()) },
+                                   includeAllDay: config.calendar.includeAllDay)
+        notificationDatabase.configure(enabled: config.notifications.enabled && config.notifications.readDatabase && !isDemo)
+        settingsModel?.calendarAccess = calendarProvider.access
+        settingsModel?.notificationDatabaseStatus = notificationDatabase.status
+    }
+
+    /// Banner observation and the database usually both see a notification.
+    private func receive(_ notification: IslandNotification) {
+        guard deduplicator.accept(notification) else { return }
+        model.present(notification: notification)
     }
 
     // MARK: - Status item
@@ -199,6 +244,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
         menu.addItem(makeItem("애니메이션 미리보기", #selector(playDemo), "p"))
+        let notifications = NSMenuItem(title: "알림", action: nil, keyEquivalent: "")
+        let notificationMenu = NSMenu()
+        notificationMenu.addItem(makeItem("알림 카드 미리보기", #selector(previewNotification), ""))
+        notificationMenu.addItem(makeItem("테스트 알림 보내기", #selector(sendTestNotification), ""))
+        notificationMenu.addItem(makeItem("알림 배너 구조 기록 (1분)", #selector(recordNotificationDiagnostics), ""))
+        notifications.submenu = notificationMenu
+        menu.addItem(notifications)
         menu.addItem(makeItem("설정…", #selector(showSettings), ","))
         menu.addItem(makeItem("설정 파일 열기", #selector(openConfig), ""))
         menu.addItem(makeItem("설정 다시 불러오기", #selector(reloadConfig), "r"))
@@ -236,6 +288,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.onOpenFile = { [weak self] in self?.openConfig() }
         settings.onOpenAccessibility = { [weak self] in
             self?.openAccessibility()
+        }
+        settings.onPreviewNotification = { [weak self] in self?.previewNotification() }
+        settings.onSendTestNotification = { NotificationWatcher.sendTestNotification() }
+        settings.onRecordNotificationDiagnostics = { [weak self] in self?.recordNotificationDiagnostics() }
+        settings.onOpenFullDiskAccess = {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        settings.onOpenCalendarPrivacy = {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                NSWorkspace.shared.open(url)
+            }
         }
         settingsModel = settings
         settingsController = SettingsWindowController(model: settings)
@@ -277,6 +342,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(windowItem)
 
         NSApp.mainMenu = main
+    }
+
+    @objc private func previewNotification() {
+        model.previewNotification()
+    }
+
+    @objc private func sendTestNotification() {
+        NotificationWatcher.sendTestNotification()
+    }
+
+    /// Records the Notification Center tree for a minute while a test banner
+    /// arrives, then shows the log so it can be attached to a bug report.
+    @objc private func recordNotificationDiagnostics() {
+        let url = notificationWatcher.recordDiagnostics(seconds: 60)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            NotificationWatcher.sendTestNotification()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 62) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
     }
 
     @objc private func openConfig() {

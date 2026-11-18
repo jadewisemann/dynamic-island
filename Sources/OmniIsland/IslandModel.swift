@@ -8,6 +8,14 @@ enum IslandPhase: Equatable {
     case compact
     /// A move just happened: compact row plus an event header.
     case expanded
+    /// A macOS notification (or calendar alert) card.
+    case notification
+    /// Modifier held longer: workspace row plus clock, events and recent
+    /// notifications.
+    case dashboard
+
+    /// Phases that the modifier opened and that close when it is released.
+    var isModifierPhase: Bool { self == .compact || self == .dashboard }
 }
 
 /// Size of the hardware notch (or a stand-in on screens without one).
@@ -32,6 +40,18 @@ final class IslandModel: ObservableObject {
     /// Dock notification badges, keyed by lower-cased bundle id.
     @Published private(set) var badges: [String: String] = [:]
     @Published var geometry = NotchGeometry(width: 200, height: 32, hasNotch: false)
+    /// The notification card on screen (phase .notification).
+    @Published private(set) var notification: IslandNotification?
+    /// How many times the current card was merged with a newer one.
+    @Published private(set) var notificationMergeCount = 0
+    /// Notifications waiting for their turn.
+    @Published private(set) var notificationQueue: [IslandNotification] = []
+    /// Shown but not yet looked at: drawn beside the notch while hidden.
+    @Published private(set) var missedNotifications: [IslandNotification] = []
+    /// Most recent first, for the dashboard.
+    @Published private(set) var recentNotifications: [IslandNotification] = []
+    /// Today's and tomorrow's calendar events, sorted by start.
+    @Published private(set) var calendarEvents: [CalendarEvent] = []
     /// Whether macOS currently uses dark mode (for theme.mode = system).
     @Published var systemIsDark = true
     /// Settings preview only: forces the light (true) or dark (false) look.
@@ -45,6 +65,9 @@ final class IslandModel: ObservableObject {
     private var collapseWork: DispatchWorkItem?
     private var coalesceWork: DispatchWorkItem?
     private var pendingEvent: IslandEvent?
+    private var dashboardWork: DispatchWorkItem?
+    private var notificationWork: DispatchWorkItem?
+    private var notificationShownAt = Date.distantPast
 
     // MARK: - Inputs
 
@@ -91,10 +114,31 @@ final class IslandModel: ObservableObject {
         activeWorkspaceNumber = 1
         focusedApp = AppRef(name: "Finder", bundleId: "com.apple.finder")
         badges = ["com.apple.mobilesms": "2"]
+        let now = Date()
+        func event(_ id: String, _ title: String, in minutes: Double, length: Double, color: String) -> CalendarEvent {
+            CalendarEvent(id: id, title: title, start: now.addingTimeInterval(minutes * 60),
+                          end: now.addingTimeInterval((minutes + length) * 60), isAllDay: false,
+                          location: nil, calendarTitle: "샘플", colorHex: color)
+        }
+        calendarEvents = [
+            event("sample-a", "디자인 리뷰", in: 12, length: 30, color: "#FF9F0A"),
+            event("sample-b", "1:1 미팅", in: 160, length: 30, color: "#30D158"),
+            event("sample-c", "저녁 약속", in: 330, length: 90, color: "#64D2FF"),
+        ]
+        recentNotifications = [
+            IslandNotification(source: .system, appName: "메시지", bundleId: "com.apple.MobileSMS",
+                               title: "민지", body: "테마 시안 확인했어요", date: now.addingTimeInterval(-180)),
+            IslandNotification(source: .system, appName: "메일", bundleId: "com.apple.mail",
+                               title: "주간 보고", date: now.addingTimeInterval(-1200)),
+        ]
     }
 
     /// Settings preview: shows a phase and stays there.
     func showSample(_ next: IslandPhase) {
+        if next == .notification {
+            showSampleNotification()
+            return
+        }
         collapseWork?.cancel()
         animate {
             if next == .expanded {
@@ -122,15 +166,24 @@ final class IslandModel: ObservableObject {
         modifierHeld = held
         showWork?.cancel()
         hideWork?.cancel()
+        dashboardWork?.cancel()
         if held {
             showWork = after(ms: config.trigger.holdDelayMs) { [weak self] in
-                guard let self, self.modifierHeld, self.phase == .hidden else { return }
+                guard let self, self.modifierHeld else { return }
+                if self.phase == .notification {
+                    // Make way for the workspace row; the card comes back later.
+                    self.interruptNotification()
+                }
+                guard self.phase == .hidden else { return }
+                self.clearMissed()
                 self.setPhase(.compact)
+                self.scheduleDashboard()
             }
         } else {
             hideWork = after(ms: config.trigger.hideDelayMs) { [weak self] in
-                guard let self, !self.modifierHeld, self.phase == .compact else { return }
+                guard let self, !self.modifierHeld, self.phase.isModifierPhase else { return }
                 self.setPhase(.hidden)
+                self.showNextNotification()
             }
         }
     }
@@ -156,6 +209,180 @@ final class IslandModel: ObservableObject {
             guard let e = self.pendingEvent else { return }
             self.pendingEvent = nil
             self.show(e)
+        }
+    }
+
+    // MARK: - Notifications and calendar
+
+    func setCalendarEvents(_ events: [CalendarEvent]) {
+        guard events != calendarEvents else { return }
+        animate { self.calendarEvents = events }
+    }
+
+    /// The next event that has not ended yet.
+    var nextEvent: CalendarEvent? {
+        let now = Date()
+        return calendarEvents.first { !$0.isAllDay && $0.end > now }
+    }
+
+    /// Events still to come today, ongoing ones included.
+    var remainingTodayEvents: [CalendarEvent] {
+        let now = Date()
+        let endOfDay = Calendar.current.startOfDay(for: now).addingTimeInterval(86_400)
+        return calendarEvents.filter { $0.end > now && $0.start < endOfDay }
+    }
+
+    /// Whether a notification passes the app filter in the settings.
+    func allows(_ n: IslandNotification) -> Bool {
+        let c = config.notifications
+        guard c.enabled || n.source == .calendar else { return false }
+        let names = Set(c.apps.map { $0.lowercased() })
+        let matches = names.contains(n.appName.lowercased()) || names.contains(n.bundleId?.lowercased() ?? "\u{0}")
+        switch c.filterMode.lowercased() {
+        case "allow": return n.source == .calendar || matches
+        case "block": return !matches
+        default: return true
+        }
+    }
+
+    func present(notification n: IslandNotification) {
+        guard allows(n) else { return }
+        let c = config.notifications
+        recentNotifications.insert(n, at: 0)
+        if recentNotifications.count > 8 { recentNotifications.removeLast(recentNotifications.count - 8) }
+
+        // Same app again while its card is up: replace the card's content.
+        if phase == .notification, let current = notification, current.groupKey == n.groupKey,
+           Date().timeIntervalSince(notificationShownAt) * 1000 < c.mergeWindowMs {
+            animate {
+                self.notification = n
+                self.notificationMergeCount += 1
+            }
+            scheduleNotificationEnd()
+            return
+        }
+        if phase == .hidden && pendingEvent == nil && coalesceWork == nil {
+            showNotification(n)
+        } else {
+            animate { self.notificationQueue.append(n) }
+        }
+    }
+
+    /// Settings preview / menu: shows a sample notification card.
+    func previewNotification() {
+        let sample = IslandNotification(
+            source: .system, appName: "메시지", bundleId: "com.apple.MobileSMS",
+            title: "민지", subtitle: nil, body: "테마 프리셋 시안 확인했어요. 터미널 테마가 제일 마음에 들어요.")
+        if phase == .notification || phase == .hidden {
+            notificationWork?.cancel()
+            showNotification(sample)
+        }
+    }
+
+    /// Settings preview: keeps a sample card on screen.
+    func showSampleNotification() {
+        notificationWork?.cancel()
+        collapseWork?.cancel()
+        animate {
+            self.notification = IslandNotification(
+                source: .system, appName: "메시지", bundleId: "com.apple.MobileSMS",
+                title: "민지", subtitle: nil, body: "테마 프리셋 시안 확인했어요. 터미널 테마가 제일 마음에 들어요.")
+            self.notificationMergeCount = 0
+            self.eventSerial &+= 1
+            self.phase = .notification
+        }
+    }
+
+    /// Text of a card after applying notifications.contentMode.
+    func visibleText(_ n: IslandNotification) -> (title: String, subtitle: String?, body: String?) {
+        switch config.notifications.contentMode.lowercased() {
+        case "app": return (n.appName, nil, nil)
+        case "title": return (n.title, nil, nil)
+        default: return (n.title, n.subtitle, n.body)
+        }
+    }
+
+    var showsIndicator: Bool {
+        config.notifications.keepIndicator && !missedNotifications.isEmpty && !hiddenStyleFades && !isFloating
+    }
+
+    /// Distinct apps of the missed notifications, newest first.
+    var missedApps: [IslandNotification] {
+        var seen = Set<String>()
+        return missedNotifications.filter { seen.insert($0.groupKey).inserted }
+    }
+
+    private func showNotification(_ n: IslandNotification) {
+        collapseWork?.cancel()
+        animate {
+            self.notification = n
+            self.notificationMergeCount = 0
+            self.eventSerial &+= 1
+            self.phase = .notification
+        }
+        notificationShownAt = Date()
+        scheduleNotificationEnd()
+    }
+
+    private func scheduleNotificationEnd() {
+        notificationWork?.cancel()
+        notificationWork = after(ms: config.notifications.durationMs) { [weak self] in
+            guard let self, self.phase == .notification else { return }
+            if let n = self.notification { self.addMissed(n) }
+            if !self.showNextNotification() {
+                self.setPhase(.hidden)
+            }
+        }
+    }
+
+    /// Puts the card back at the front of the queue so it shows again later.
+    private func interruptNotification() {
+        notificationWork?.cancel()
+        if let n = notification {
+            notificationQueue.insert(n, at: 0)
+        }
+        setPhase(.hidden)
+    }
+
+    /// Shows the next queued notification when nothing else is on screen.
+    @discardableResult
+    private func showNextNotification() -> Bool {
+        guard !modifierHeld, phase == .hidden || phase == .notification,
+              !notificationQueue.isEmpty else { return false }
+        let next = notificationQueue.removeFirst()
+        showNotification(next)
+        return true
+    }
+
+    private func addMissed(_ n: IslandNotification) {
+        guard config.notifications.keepIndicator else { return }
+        let now = Date()
+        let timeout = max(config.notifications.indicatorTimeoutMin, 0.1) * 60
+        var list = missedNotifications.filter { now.timeIntervalSince($0.date) < timeout }
+        list.insert(n, at: 0)
+        if list.count > 20 { list.removeLast(list.count - 20) }
+        animate { self.missedNotifications = list }
+        after(ms: timeout * 1000 + 500) { [weak self] in self?.pruneMissed() }
+    }
+
+    private func pruneMissed() {
+        let timeout = max(config.notifications.indicatorTimeoutMin, 0.1) * 60
+        let now = Date()
+        let list = missedNotifications.filter { now.timeIntervalSince($0.date) < timeout }
+        guard list.count != missedNotifications.count else { return }
+        animate { self.missedNotifications = list }
+    }
+
+    func clearMissed() {
+        guard !missedNotifications.isEmpty else { return }
+        animate { self.missedNotifications = [] }
+    }
+
+    private func scheduleDashboard() {
+        guard config.dashboard.enabled, !config.dashboard.items.isEmpty else { return }
+        dashboardWork = after(ms: config.dashboard.holdMs) { [weak self] in
+            guard let self, self.modifierHeld, self.phase == .compact else { return }
+            self.setPhase(.dashboard)
         }
     }
 
@@ -338,6 +565,8 @@ final class IslandModel: ObservableObject {
         case "clock": return config.widgets.clockFormat.lowercased() == "24h" ? 52 : 70
         case "date": return 84
         case "windows": return 40
+        case "nextevent": return nextEvent == nil ? 84 : 150
+        case "notifications": return 40
         case "workspace":
             let text = activeWorkspaceText ?? ""
             return max(28, ceil((text as NSString).size(withAttributes: [.font: pillFont]).width) + 20)
@@ -420,7 +649,37 @@ final class IslandModel: ObservableObject {
         config.layout.widthMode.lowercased() == "fixed" ? CGFloat(config.layout.fixedWidth) : 0
     }
 
-    var compactSize: CGSize {
+    // MARK: Side panels
+
+    /// Side length of one square widget tile: the height of the island
+    /// while the workspace row is shown.
+    var panelUnit: CGFloat { centerSize.height }
+
+    var leftPanelItems: [String] { config.widgets.leftPanel.filter { !$0.isEmpty } }
+    var rightPanelItems: [String] { config.widgets.rightPanel.filter { !$0.isEmpty } }
+
+    private func panelWidth(_ items: [String]) -> CGFloat {
+        guard !items.isEmpty else { return 0 }
+        let units = min(max(Int(config.widgets.panelUnits.rounded()), 1), 3)
+        return CGFloat(max(units, items.count)) * panelUnit
+    }
+
+    /// Each side is sized on its own; an empty side has no panel at all.
+    var leftPanelWidth: CGFloat { panelWidth(leftPanelItems) }
+    var rightPanelWidth: CGFloat { panelWidth(rightPanelItems) }
+
+    var showsSidePanels: Bool {
+        (phase == .compact || phase == .dashboard) && leftPanelWidth + rightPanelWidth > 0
+    }
+
+    /// Shift that keeps the workspace row under the notch when the two
+    /// panels differ in width (e.g. a panel on the right only).
+    var panelOffset: CGFloat {
+        showsSidePanels ? (rightPanelWidth - leftPanelWidth) / 2 : 0
+    }
+
+    /// The workspace row part of the island, without side panels.
+    var centerSize: CGSize {
         let padding = contentPadding * 2
         if isFloating {
             let wings = leftWingWidth + rightWingWidth
@@ -433,18 +692,49 @@ final class IslandModel: ObservableObject {
         return CGSize(width: width, height: geometry.height + rowHeight)
     }
 
+    var compactSize: CGSize {
+        let center = centerSize
+        return CGSize(width: center.width + leftPanelWidth + rightPanelWidth, height: center.height)
+    }
+
+    /// Width available to the middle column in the current phase.
+    var centerWidth: CGFloat {
+        showsSidePanels ? currentSize.width - leftPanelWidth - rightPanelWidth : currentSize.width
+    }
+
     var expandedSize: CGSize {
         let a = config.appearance
-        let width = max(CGFloat(a.expandedWidth), compactSize.width)
+        let width = max(CGFloat(a.expandedWidth), centerSize.width)
         let row = eventPlacement == .replace ? 0 : rowHeight
         return CGSize(width: width, height: topStripHeight + row + CGFloat(a.expandedHeaderHeight))
     }
 
+    static let indicatorEarWidth: CGFloat = 34
+    static let notificationCardHeight: CGFloat = 78
+    static let dashboardHeight: CGFloat = 112
+
+    var hiddenSize: CGSize {
+        let ears = showsIndicator ? 2 * Self.indicatorEarWidth : 0
+        return CGSize(width: geometry.width + ears, height: geometry.height)
+    }
+
+    var notificationSize: CGSize {
+        let width = max(CGFloat(config.appearance.expandedWidth), centerSize.width, 360)
+        return CGSize(width: width, height: topStripHeight + Self.notificationCardHeight)
+    }
+
+    var dashboardSize: CGSize {
+        let width = max(compactSize.width, 380)
+        return CGSize(width: width, height: centerSize.height + Self.dashboardHeight)
+    }
+
     var currentSize: CGSize {
         switch phase {
-        case .hidden: return CGSize(width: geometry.width, height: geometry.height)
+        case .hidden: return hiddenSize
         case .compact: return compactSize
         case .expanded: return expandedSize
+        case .notification: return notificationSize
+        case .dashboard: return dashboardSize
         }
     }
 
@@ -456,10 +746,12 @@ final class IslandModel: ObservableObject {
     /// Largest size the island can take, including the floating gap; the
     /// panel is sized from this.
     var maximumSize: CGSize {
-        let e = expandedSize
-        let c = compactSize
-        let height = max(e.height, c.height) + (isFloating ? floatingTop : 0)
-        return CGSize(width: max(e.width, 520), height: max(height, geometry.height))
+        // Room for the offset when only one side has a panel.
+        let shifted = CGSize(width: centerSize.width + 2 * max(leftPanelWidth, rightPanelWidth), height: 0)
+        let sizes = [expandedSize, compactSize, notificationSize, dashboardSize, shifted]
+        let height = (sizes.map(\.height).max() ?? 0) + (isFloating ? floatingTop : 0)
+        let width = sizes.map(\.width).max() ?? 0
+        return CGSize(width: max(width, 520), height: max(height, geometry.height))
     }
 
     var swiftUIAnimation: Animation? {
@@ -483,14 +775,19 @@ final class IslandModel: ObservableObject {
 
     private func show(_ event: IslandEvent) {
         collapseWork?.cancel()
+        if phase == .notification {
+            notificationWork?.cancel()
+            if let n = notification { notificationQueue.insert(n, at: 0) }
+        }
         animate {
             self.event = event
             self.eventSerial &+= 1
             self.phase = .expanded
         }
         collapseWork = after(ms: config.behavior.eventDurationMs) { [weak self] in
-            guard let self else { return }
+            guard let self, self.phase == .expanded else { return }
             self.setPhase(self.modifierHeld ? .compact : .hidden)
+            self.showNextNotification()
         }
     }
 

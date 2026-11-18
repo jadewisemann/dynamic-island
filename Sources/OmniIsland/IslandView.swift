@@ -36,7 +36,7 @@ struct IslandView: View {
     }
 
     private var showsRow: Bool {
-        guard !isHidden else { return false }
+        guard !isHidden, model.phase != .notification else { return false }
         return !(model.phase == .expanded && model.event != nil && model.eventPlacement == .replace)
     }
 
@@ -44,31 +44,28 @@ struct IslandView: View {
         let size = model.currentSize
         let topInset = isHidden || model.isFloating ? 0 : CGFloat(a.topCornerRadius)
 
-        VStack(spacing: 0) {
-            if !isHidden && !model.isFloating {
-                topStrip
-                    .frame(height: model.geometry.height)
+        HStack(alignment: .top, spacing: 0) {
+            if model.showsSidePanels && model.leftPanelWidth > 0 {
+                SidePanel(model: model, items: model.leftPanelItems, edge: .leading)
+                    .frame(width: model.leftPanelWidth, height: model.panelUnit)
                     .transition(fade)
             }
-            if model.eventPlacement == .above {
-                eventHeader
-            }
-            if showsRow {
-                rowArea
-                    .frame(height: model.rowHeight)
+            centerColumn
+                .frame(maxWidth: .infinity)
+            if model.showsSidePanels && model.rightPanelWidth > 0 {
+                SidePanel(model: model, items: model.rightPanelItems, edge: .trailing)
+                    .frame(width: model.rightPanelWidth, height: model.panelUnit)
                     .transition(fade)
-            }
-            if model.eventPlacement != .above {
-                eventHeader
             }
         }
-        .padding(.horizontal, topInset)
+        .padding(.leading, model.showsSidePanels && model.leftPanelWidth > 0 ? 0 : topInset)
+        .padding(.trailing, model.showsSidePanels && model.rightPanelWidth > 0 ? 0 : topInset)
         .frame(width: size.width, height: size.height, alignment: .top)
         .background {
             IslandBackground(model: model, solidBlack: isHidden && !model.hiddenStyleFades)
         }
         .overlay(alignment: .bottom) {
-            if model.phase == .expanded && a.showEventProgress {
+            if (model.phase == .expanded || model.phase == .notification) && a.showEventProgress {
                 EventProgressBar(model: model)
                     .id(model.eventSerial)
                     .transition(.opacity)
@@ -88,6 +85,47 @@ struct IslandView: View {
         .modifier(PopEffect(trigger: model.config.motion.popOnEvent ? model.eventSerial : 0))
         .foregroundStyle(model.palette.text)
         .padding(.top, model.currentTopOffset)
+        .offset(x: model.horizontalPosition == "center" ? model.panelOffset : 0)
+    }
+
+    /// Notch strip, workspace row and whatever the phase adds below it.
+    private var centerColumn: some View {
+        VStack(spacing: 0) {
+            if !isHidden && !model.isFloating {
+                topStrip
+                    .frame(height: model.geometry.height)
+                    .transition(fade)
+            }
+            if model.eventPlacement == .above {
+                eventHeader
+            }
+            if showsRow {
+                rowArea
+                    .frame(height: model.rowHeight)
+                    .transition(fade)
+            }
+            if model.eventPlacement != .above {
+                eventHeader
+            }
+            if model.phase == .notification, let n = model.notification {
+                NotificationCard(model: model, notification: n)
+                    .frame(height: IslandModel.notificationCardHeight)
+                    .padding(.horizontal, 16)
+                    .id(n.id)
+                    .transition(fade)
+            }
+            if model.phase == .dashboard {
+                DashboardView(model: model)
+                    .frame(height: IslandModel.dashboardHeight)
+                    .padding(.horizontal, max(model.contentPadding, 16))
+                    .transition(fade)
+            }
+            if isHidden && model.showsIndicator {
+                MissedIndicator(model: model)
+                    .frame(height: model.geometry.height)
+                    .transition(.opacity)
+            }
+        }
     }
 
     @ViewBuilder private var eventHeader: some View {
@@ -154,7 +192,7 @@ struct IslandView: View {
     /// Row at notch height with a widget on each wing. The middle is covered
     /// by the hardware notch.
     private var topStrip: some View {
-        let wingSpace = max(0, (model.currentSize.width - model.geometry.width) / 2 - 20)
+        let wingSpace = max(0, (model.centerWidth - model.geometry.width) / 2 - 20)
         return HStack(spacing: 6) {
             WingView(model: model, widget: model.config.widgets.leftWing)
                 .frame(maxWidth: wingSpace, alignment: .leading)
@@ -276,9 +314,63 @@ struct WingView: View {
                     .contentTransition(.numericText())
             }
             .foregroundStyle(p.secondary)
+        case "nextevent":
+            if let event = model.nextEvent {
+                NextEventText(model: model, event: event, size: size)
+            } else {
+                ClockText(template: "MMMdE", font: model.textFont(size: size * 0.85, weight: .medium), color: p.secondary)
+            }
+        case "notifications":
+            if !model.missedNotifications.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "bell.fill")
+                        .font(.system(size: size * 0.75, weight: .semibold))
+                    Text("\(model.missedNotifications.count)")
+                        .font(model.numberFont(size: size * 0.85, weight: .semibold))
+                        .contentTransition(.numericText())
+                }
+                .foregroundStyle(p.secondary)
+            }
         default:
             EmptyView()
         }
+    }
+}
+
+/// "14:00 디자인 리뷰 · 12분" for the next calendar event.
+struct NextEventText: View {
+    @ObservedObject var model: IslandModel
+    let event: CalendarEvent
+    let size: CGFloat
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(Color(hex: event.colorHex ?? "", fallback: model.palette.accent))
+                    .frame(width: 6, height: 6)
+                Text(event.title)
+                    .font(model.textFont(size: size * 0.85, weight: .medium))
+                    .foregroundStyle(model.palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(Self.relative(event, now: context.date))
+                    .font(model.textFont(size: size * 0.8, weight: .regular))
+                    .foregroundStyle(model.palette.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+    }
+
+    static func relative(_ event: CalendarEvent, now: Date) -> String {
+        if event.isOngoing(at: now) { return "진행 중" }
+        let minutes = Int((event.start.timeIntervalSince(now) / 60).rounded(.up))
+        if minutes < 60 { return "\(max(minutes, 0))분" }
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("HHmm")
+        return f.string(from: event.start)
     }
 }
 
@@ -774,7 +866,8 @@ struct EventProgressBar: View {
 
     var body: some View {
         let color = model.palette.progress
-        let duration = max(model.config.behavior.eventDurationMs, 100) / 1000
+        let ms = model.phase == .notification ? model.config.notifications.durationMs : model.config.behavior.eventDurationMs
+        let duration = max(ms, 100) / 1000
         GeometryReader { proxy in
             Capsule()
                 .fill(color.opacity(0.85))
