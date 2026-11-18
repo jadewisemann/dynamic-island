@@ -774,6 +774,7 @@ private struct WidgetSettings: View {
                         Text("점 표시").tag("dots")
                         Text("창마다 아이콘").tag("separate")
                     }
+                    Toggle("포커스된 창 강조", isOn: $model.draft.appearance.highlightFocusedWindow)
                     Toggle("알림 배지 표시", isOn: $model.draft.appearance.showBadges)
                     if model.draft.appearance.showBadges {
                         SliderRow(title: "배지 확인 간격", value: $model.draft.behavior.badgeIntervalMs,

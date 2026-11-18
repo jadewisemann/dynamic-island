@@ -115,6 +115,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `appearance.workspaceStyle` | `"apps"` | `apps`는 워크스페이스 번호 옆에 그 워크스페이스의 앱 아이콘을 나열하고(OmniWM 워크스페이스 바와 비슷합니다), `pills`는 번호만 보여 줍니다. |
 | `appearance.appIconSize` / `maxAppsPerWorkspace` | `20` / `6` | 앱 아이콘 크기와 워크스페이스마다 보여 줄 최대 아이콘 수입니다. 넘치는 앱은 `+N`으로 묶습니다. |
 | `appearance.showBadges` | `true` | Dock 아이콘의 빨간 알림 배지를 앱 아이콘에도 표시합니다. 손쉬운 사용 권한이 필요하며, `behavior.badgeIntervalMs`(기본 3000) 간격으로 다시 읽습니다. |
+| `appearance.highlightFocusedWindow` | `true` | 지금 포커스된 창의 앱 아이콘을 강조색 테두리로 감싸서 표시합니다. 포커스가 옮겨지면 테두리도 따라 이동합니다. |
 | `appearance.multiWindowStyle` | `"dots"` | 한 워크스페이스에 창이 여러 개 있는 앱을 보여 주는 방식입니다. `merge`는 아이콘 하나로 합치고, `dots`는 아이콘 아래에 창 개수만큼 점(최대 3개)을 찍고, `separate`는 창마다 아이콘을 따로 표시합니다. |
 | `appearance.backgroundStyle` | `"solid"` | `solid`(단색), `material`(macOS 반투명 재질), `gradient`(`backgroundColor`에서 `gradientColor`로, `gradientAngle` 방향) 중 하나입니다. 반투명 재질의 두께는 `material`(`thin`, `regular`, `thick`)로 정합니다. |
 | `appearance.activeTextColor` / `fillColor` | `"#FFFFFF"` | 활성 워크스페이스 위의 글자 색과, 비활성 칸·창 개수 점·테두리에 옅게 쓰는 기본 색입니다. 밝은 테마에서는 `fillColor`를 검정으로 둡니다. |

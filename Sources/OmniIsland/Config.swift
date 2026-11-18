@@ -129,6 +129,8 @@ struct IslandConfig: Equatable {
         /// merge (one icon), dots (one icon with a dot per window, up to
         /// three) or separate (one icon per window).
         var multiWindowStyle = "dots"
+        /// Ring the icon of the focused window in the accent color.
+        var highlightFocusedWindow = true
     }
 
     struct Theme: Equatable {
@@ -425,6 +427,7 @@ extension IslandConfig {
         // Older files used a boolean; false meant "merge".
         if !a.bool("showWindowCount", true) { c.appearance.multiWindowStyle = "merge" }
         c.appearance.multiWindowStyle = a.string("multiWindowStyle", c.appearance.multiWindowStyle)
+        c.appearance.highlightFocusedWindow = a.bool("highlightFocusedWindow", c.appearance.highlightFocusedWindow)
 
         let th = r.sub("theme")
         c.theme.mode = th.string("mode", c.theme.mode)
@@ -651,6 +654,8 @@ extension IslandConfig {
             // merge: 아이콘 하나로 합침, dots: 아이콘 아래에 창 개수만큼 점(최대 3개),
             // separate: 창마다 아이콘을 따로 표시
             "multiWindowStyle": \(q(a.multiWindowStyle)),
+            // 지금 포커스된 창의 아이콘을 강조색 테두리로 표시합니다.
+            "highlightFocusedWindow": \(b(a.highlightFocusedWindow)),
           },
 
           "theme": {
