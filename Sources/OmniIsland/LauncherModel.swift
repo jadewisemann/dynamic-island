@@ -22,6 +22,8 @@ struct LauncherItem: Identifiable, Equatable {
         case islandSettings
         /// A web address or search: what to open, and an SF Symbol.
         case web(URL, symbol: String)
+        /// Something copied earlier, kept on the clipboard shelf.
+        case shelf(ShelfItem)
     }
 
     let id: String
@@ -31,6 +33,8 @@ struct LauncherItem: Identifiable, Equatable {
     /// Character offsets of `title` the query matched.
     let hits: [Int]
     let score: Int
+    /// Heading drawn above the first row of a group ("최근에 연 앱", "선반").
+    var section: String? = nil
 
     var kindLabel: String {
         switch kind {
@@ -42,6 +46,7 @@ struct LauncherItem: Identifiable, Equatable {
         case .pane: return "시스템 설정"
         case .islandSettings: return "OmniIsland"
         case .web: return "웹"
+        case .shelf: return "선반"
         }
     }
 }
@@ -69,6 +74,13 @@ final class LauncherModel: ObservableObject {
     var onFocusWindow: ((LauncherWindow) -> Void)?
     var onSummonWindow: ((LauncherWindow) -> Void)?
     var onOpenSettings: (() -> Void)?
+    /// Clipboard shelf, newest first.
+    var shelfProvider: (() -> [ShelfItem])?
+    var shelfCount = 4
+    var onCopyShelf: ((ShelfItem) -> Void)?
+    var onPasteShelf: ((ShelfItem) -> Void)?
+    var onRemoveShelf: ((ShelfItem) -> Void)?
+    var shelfDragProvider: ((ShelfItem) -> NSItemProvider)?
 
     // Answers that arrive later, each for the query it was asked with.
     private var epoch = 0
@@ -83,7 +95,46 @@ final class LauncherModel: ObservableObject {
         apps.onUpdate = { [weak self] in self?.refresh() }
     }
 
-    var isShowingRecent: Bool { query.isEmpty && !results.isEmpty }
+    /// Number of section headings drawn above the rows.
+    var sectionCount: Int {
+        var count = 0
+        var last: String?
+        for item in results where item.section != last {
+            last = item.section
+            if item.section != nil { count += 1 }
+        }
+        return count
+    }
+
+    /// ⌘⌫: drops the selected shelf item.
+    func removeSelected() -> Bool {
+        guard results.indices.contains(selection), case .shelf(let item) = results[selection].kind else { return false }
+        onRemoveShelf?(item)
+        refresh()
+        return true
+    }
+
+    /// Return copies a shelf item back, ⌘Return pastes it into the app
+    /// that had focus.
+    private static let shelfHint = "Return 복사 · ⌘Return 붙여넣기 · ⌘⌫ 삭제"
+
+    private func shelfRow(_ item: ShelfItem, hits: [Int] = [], score: Int = 0, section: String? = nil) -> LauncherItem {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate(Calendar.current.isDateInToday(item.date) ? "HHmm" : "MMMdHHmm")
+        let source = [item.sourceApp, f.string(from: item.date)].compactMap { $0 }.joined(separator: " · ")
+        return LauncherItem(id: "shelf:" + item.id, kind: .shelf(item), title: item.title,
+                            subtitle: source, hits: hits, score: score, section: section)
+    }
+
+    /// "선반", "shelf" or "clip", optionally followed by words to filter by.
+    private static func shelfQuery(_ q: String) -> String? {
+        let lower = q.lowercased()
+        for word in ["선반", "shelf", "clip", "클립보드"] {
+            if lower == word { return "" }
+            if lower.hasPrefix(word + " ") { return String(q.dropFirst(word.count + 1)).trimmingCharacters(in: .whitespaces) }
+        }
+        return nil
+    }
 
     // MARK: - Lifecycle
 
@@ -168,6 +219,8 @@ final class LauncherModel: ObservableObject {
             onOpenSettings?()
         case .web(let url, _):
             NSWorkspace.shared.open(url)
+        case .shelf(let shelfItem):
+            if alternate { onPasteShelf?(shelfItem) } else { onCopyShelf?(shelfItem) }
         }
     }
 
@@ -256,12 +309,23 @@ final class LauncherModel: ObservableObject {
     private func search(_ text: String) -> [LauncherItem] {
         let limit = max(3, Int(config.maxResults))
         let q = text.trimmingCharacters(in: .whitespaces)
+        let shelf = shelfProvider?() ?? []
         if q.isEmpty {
-            guard config.showRecent else { return [] }
-            return apps.recentApps(limit: min(Int(config.recentCount), limit)).map { app in
-                LauncherItem(id: "app:" + app.path, kind: .app(app), title: app.displayName,
-                             subtitle: nil, hits: [], score: 0)
+            var list: [LauncherItem] = []
+            if config.showRecent {
+                list = apps.recentApps(limit: min(Int(config.recentCount), limit)).map { app in
+                    LauncherItem(id: "app:" + app.path, kind: .app(app), title: app.displayName,
+                                 subtitle: nil, hits: [], score: 0, section: "최근에 연 앱")
+                }
             }
+            list += shelf.prefix(max(0, shelfCount)).map { shelfRow($0, section: "선반 · " + Self.shelfHint) }
+            return list
+        }
+
+        // "선반 …" lists only the shelf.
+        if let filter = Self.shelfQuery(q) {
+            let matching = filter.isEmpty ? shelf : shelf.filter { $0.searchText.localizedCaseInsensitiveContains(filter) }
+            return matching.prefix(max(limit, 12)).map { shelfRow($0, section: "선반 · " + Self.shelfHint) }
         }
 
         // Answers on top.
@@ -351,6 +415,16 @@ final class LauncherModel: ObservableObject {
             }
         }
 
+        if q.count >= 2 {
+            for item in shelf {
+                if let m = FuzzyMatcher.match(q, FuzzyMatcher.Candidate(item.title)), m.score >= 400 {
+                    items.append(shelfRow(item, hits: m.hits, score: m.score - 150))
+                } else if item.searchText.localizedCaseInsensitiveContains(q) {
+                    items.append(shelfRow(item, score: 60))
+                }
+            }
+        }
+
         items.sort { a, b in
             a.score != b.score ? a.score > b.score
                 : a.title.localizedStandardCompare(b.title) == .orderedAscending
@@ -408,7 +482,7 @@ final class LauncherModel: ObservableObject {
     /// Height of the launcher part below the workspace row.
     var bodyHeight: CGFloat {
         var height = Self.fieldHeight + Self.verticalPadding
-        if isShowingRecent { height += Self.headerHeight }
+        height += CGFloat(sectionCount) * Self.headerHeight
         if results.isEmpty && !query.isEmpty {
             height += Self.messageHeight
         } else {
@@ -419,7 +493,7 @@ final class LauncherModel: ObservableObject {
 
     /// Tallest the launcher can get, for sizing the panel.
     var maximumBodyHeight: CGFloat {
-        Self.fieldHeight + Self.verticalPadding + Self.headerHeight
-            + CGFloat(max(3, Int(config.maxResults))) * Self.rowHeight
+        Self.fieldHeight + Self.verticalPadding + 2 * Self.headerHeight
+            + CGFloat(max(max(3, Int(config.maxResults)), Int(config.recentCount) + shelfCount, 12)) * Self.rowHeight
     }
 }
