@@ -31,7 +31,11 @@ final class IslandPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
     }
 
-    override var canBecomeKey: Bool { false }
+    /// True only while the launcher is open, so the panel can take typing
+    /// without activating the app (the frontmost app stays frontmost).
+    var allowsKey = false
+
+    override var canBecomeKey: Bool { allowsKey }
     override var canBecomeMain: Bool { false }
 
     /// Borderless windows would otherwise be pushed below the menu bar.
@@ -51,6 +55,7 @@ final class IslandWindowController {
     private var preferredDisplayName: String?
     private var phaseObserver: AnyCancellable?
     private var mouseTimer: Timer?
+    private var resignObserver: NSObjectProtocol?
 
     init(model: IslandModel) {
         self.model = model
@@ -60,8 +65,22 @@ final class IslandWindowController {
         phaseObserver = model.$phase
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.updateMouseTracking() }
+                MainActor.assumeIsolated {
+                    self?.updateMouseTracking()
+                    self?.updateKeyFocus()
+                }
             }
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            // Clicked another app or window: the launcher closes.
+            MainActor.assumeIsolated {
+                guard let self, self.model.phase == .launcher else { return }
+                self.model.closeLauncher()
+            }
+        }
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -116,6 +135,39 @@ final class IslandWindowController {
         if panel.frame != frame {
             panel.setFrame(frame, display: true)
         }
+    }
+
+    // MARK: - Keyboard
+
+    /// Makes the panel key while the launcher is open, and gives the key
+    /// back to the app that had it when the launcher closes.
+    private func updateKeyFocus() {
+        if model.phase == .launcher {
+            guard !panel.isKeyWindow else { return }
+            panel.allowsKey = true
+            panel.becomesKeyOnlyIfNeeded = false
+            panel.makeKeyAndOrderFront(nil)
+            if let field = Self.find(LauncherTextView.self, in: panel.contentView) {
+                panel.makeFirstResponder(field)
+            }
+        } else if panel.allowsKey {
+            panel.allowsKey = false
+            panel.becomesKeyOnlyIfNeeded = true
+            if panel.isKeyWindow {
+                // Ordering out hands the key back to the frontmost app's window.
+                panel.orderOut(nil)
+                panel.orderFrontRegardless()
+            }
+        }
+    }
+
+    private static func find<T: NSView>(_ type: T.Type, in view: NSView?) -> T? {
+        guard let view else { return nil }
+        if let match = view as? T { return match }
+        for sub in view.subviews {
+            if let match = find(type, in: sub) { return match }
+        }
+        return nil
     }
 
     // MARK: - Clicks

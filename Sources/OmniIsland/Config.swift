@@ -18,6 +18,7 @@ struct IslandConfig: Equatable {
     var notifications = Notifications()
     var calendar = CalendarConfig()
     var dashboard = Dashboard()
+    var launcher = Launcher()
     // JSON key "animation"; named `motion` in Swift because `Binding.animation(_:)` would shadow it.
     var motion = AnimationConfig()
 
@@ -238,6 +239,23 @@ struct IslandConfig: Equatable {
         var holdMs = 800.0
         /// clock | events | notifications, in display order.
         var items = ["clock", "events", "notifications"]
+    }
+
+    /// Search apps and windows from the island (⌥H by default).
+    struct Launcher: Equatable {
+        var enabled = true
+        /// Global shortcut, e.g. "option+h", "control+space".
+        var hotkey = "option+h"
+        var maxResults = 8.0
+        /// With an empty query, list recently opened apps.
+        var showRecent = true
+        var recentCount = 5.0
+        var searchApps = true
+        /// Windows OmniWM manages; Return focuses one, ⌘Return brings it here.
+        var searchWindows = true
+        var calculator = true
+        /// Width of the island while the launcher is open.
+        var width = 560.0
     }
 
     struct AnimationConfig: Equatable {
@@ -547,6 +565,17 @@ extension IslandConfig {
         c.dashboard.holdMs = d.number("holdMs", c.dashboard.holdMs)
         c.dashboard.items = d.strings("items", c.dashboard.items)
 
+        let la = r.sub("launcher")
+        c.launcher.enabled = la.bool("enabled", c.launcher.enabled)
+        c.launcher.hotkey = la.string("hotkey", c.launcher.hotkey)
+        c.launcher.maxResults = la.number("maxResults", c.launcher.maxResults)
+        c.launcher.showRecent = la.bool("showRecent", c.launcher.showRecent)
+        c.launcher.recentCount = la.number("recentCount", c.launcher.recentCount)
+        c.launcher.searchApps = la.bool("searchApps", c.launcher.searchApps)
+        c.launcher.searchWindows = la.bool("searchWindows", c.launcher.searchWindows)
+        c.launcher.calculator = la.bool("calculator", c.launcher.calculator)
+        c.launcher.width = la.number("width", c.launcher.width)
+
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
         c.motion.response = n.number("response", c.motion.response)
@@ -677,7 +706,7 @@ extension IslandConfig {
         let q = Self.quote, n = Self.number
         func b(_ v: Bool) -> String { v ? "true" : "false" }
         let t = trigger, be = behavior, a = appearance, an = motion, th = theme, l = layout, w = widgets
-        let no = notifications, ca = calendar, d = dashboard
+        let no = notifications, ca = calendar, d = dashboard, la = launcher
         func list(_ values: [String]) -> String { "[" + values.map { q($0) }.joined(separator: ", ") + "]" }
         func numberList(_ values: [Double]) -> String { "[" + values.map { n($0) }.joined(separator: ", ") + "]" }
         let saved = th.saved.map { "      " + Self.savedThemeLine($0) + "," }.joined(separator: "\n")
@@ -854,6 +883,23 @@ extension IslandConfig {
             "holdMs": \(n(d.holdMs)),
             // clock | events | notifications (적은 순서대로 보여 줍니다)
             "items": \(list(d.items)),
+          },
+
+          "launcher": {
+            // 단축키를 누르면 아일랜드가 펼쳐지면서 앱과 창을 검색할 수 있습니다.
+            "enabled": \(b(la.enabled)),
+            // option+h | option+space | control+space | option+command+space ...
+            "hotkey": \(q(la.hotkey)),
+            "maxResults": \(n(la.maxResults)),
+            // 검색어가 없을 때 최근에 연 앱을 보여 줍니다.
+            "showRecent": \(b(la.showRecent)),
+            "recentCount": \(n(la.recentCount)),
+            "searchApps": \(b(la.searchApps)),
+            // OmniWM이 관리하는 창을 검색합니다. Return은 그 창으로 이동, ⌘Return은 지금 워크스페이스로 불러옵니다.
+            "searchWindows": \(b(la.searchWindows)),
+            // 2^10*3 같은 수식을 계산합니다. Return을 누르면 결과를 복사합니다.
+            "calculator": \(b(la.calculator)),
+            "width": \(n(la.width)),
           },
 
           "animation": {

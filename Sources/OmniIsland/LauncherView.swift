@@ -1,0 +1,302 @@
+import AppKit
+import SwiftUI
+
+/// Search field and result rows shown under the workspace row while the
+/// launcher is open.
+struct LauncherView: View {
+    @ObservedObject var model: IslandModel
+    @ObservedObject var launcher: LauncherModel
+
+    private var palette: IslandPalette { model.palette }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            field
+                .frame(height: LauncherModel.fieldHeight)
+                .padding(.top, 4)
+            if launcher.isShowingRecent {
+                Text("최근에 연 앱")
+                    .font(model.textFont(size: 11, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .frame(height: LauncherModel.headerHeight)
+            }
+            if launcher.results.isEmpty && !launcher.query.isEmpty {
+                Text("결과가 없습니다")
+                    .font(model.textFont(size: 13, weight: .regular))
+                    .foregroundStyle(palette.secondary)
+                    .frame(height: LauncherModel.messageHeight)
+            }
+            ForEach(Array(launcher.results.enumerated()), id: \.element.id) { index, item in
+                LauncherRow(model: model, item: item, index: index, selected: index == launcher.selection)
+                    .frame(height: LauncherModel.rowHeight)
+                    .contentShape(Rectangle())
+                    .onHover { inside in if inside { launcher.selection = index } }
+                    .onTapGesture { launcher.activate(index: index) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
+    }
+
+    private var field: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(palette.secondary)
+            ZStack(alignment: .leading) {
+                if launcher.query.isEmpty {
+                    Text("앱이나 창을 검색합니다")
+                        .font(model.textFont(size: 15, weight: .regular))
+                        .foregroundStyle(palette.secondary)
+                        .allowsHitTesting(false)
+                }
+                LauncherField(launcher: launcher, textColor: NSColor(palette.text),
+                              caretColor: NSColor(palette.accent))
+                    .frame(height: 22)
+            }
+            Text(HotKeyMonitor.symbols(model.config.launcher.hotkey))
+                .font(model.textFont(size: 11, weight: .medium))
+                .foregroundStyle(palette.secondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(palette.fill.opacity(0.09))
+        )
+    }
+}
+
+private struct LauncherRow: View {
+    @ObservedObject var model: IslandModel
+    let item: LauncherItem
+    let index: Int
+    let selected: Bool
+
+    var body: some View {
+        let p = model.palette
+        let text = selected ? p.activeText : p.text
+        let secondary = selected ? p.activeText.opacity(0.75) : p.secondary
+        HStack(spacing: 10) {
+            icon
+                .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                highlighted(item.title, color: text)
+                    .font(model.textFont(size: 13.5, weight: .medium))
+                    .lineLimit(1)
+                if let subtitle = item.subtitle {
+                    Text(subtitle)
+                        .font(model.textFont(size: 11, weight: .regular))
+                        .foregroundStyle(secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(index < 9 ? "\(item.kindLabel)  ⌘\(index + 1)" : item.kindLabel)
+                .font(model.textFont(size: 11, weight: .regular))
+                .foregroundStyle(secondary)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? p.accent.opacity(0.9) : .clear)
+        )
+    }
+
+    @ViewBuilder private var icon: some View {
+        switch item.kind {
+        case .app(let app):
+            LauncherIcon(path: app.path)
+        case .window(let window):
+            AppIconView(app: AppRef(name: window.appName, bundleId: window.bundleId), size: 26)
+        case .calculation:
+            Image(systemName: "equal.square.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(model.palette.accent)
+        }
+    }
+
+    /// The title with the matched characters drawn bold.
+    private func highlighted(_ title: String, color: Color) -> Text {
+        guard !item.hits.isEmpty else { return Text(title).foregroundColor(color) }
+        let hits = Set(item.hits)
+        var result = Text("")
+        for (i, ch) in title.enumerated() {
+            let piece = Text(String(ch)).foregroundColor(color)
+            result = result + (hits.contains(i) ? piece.bold() : piece)
+        }
+        return result
+    }
+}
+
+private struct LauncherIcon: View {
+    let path: String
+
+    var body: some View {
+        Image(nsImage: LauncherIconCache.shared.icon(path))
+            .resizable()
+            .interpolation(.high)
+    }
+}
+
+@MainActor
+final class LauncherIconCache {
+    static let shared = LauncherIconCache()
+    private var cache: [String: NSImage] = [:]
+
+    func icon(_ path: String) -> NSImage {
+        if let cached = cache[path] { return cached }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        cache[path] = image
+        return image
+    }
+}
+
+// MARK: - Text field
+
+/// A one-line text view for the query. An NSTextView rather than a SwiftUI
+/// TextField so Hangul being composed (marked text) is searched as it is
+/// typed, and so arrows, Return, Tab and Esc reach the launcher.
+struct LauncherField: NSViewRepresentable {
+    let launcher: LauncherModel
+    let textColor: NSColor
+    let caretColor: NSColor
+
+    func makeNSView(context: Context) -> LauncherTextView {
+        let view = LauncherTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 22))
+        view.isRichText = false
+        view.importsGraphics = false
+        view.allowsUndo = true
+        view.drawsBackground = false
+        view.isHorizontallyResizable = false
+        view.isVerticallyResizable = false
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.maximumNumberOfLines = 1
+        view.textContainer?.lineBreakMode = .byClipping
+        view.textContainer?.widthTracksTextView = true
+        view.isAutomaticQuoteSubstitutionEnabled = false
+        view.isAutomaticDashSubstitutionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false
+        view.isAutomaticSpellingCorrectionEnabled = false
+        view.isContinuousSpellCheckingEnabled = false
+        view.font = NSFont.systemFont(ofSize: 15)
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ view: LauncherTextView, context: Context) {
+        apply(to: view)
+        if view.serial != launcher.querySerial {
+            view.serial = launcher.querySerial
+            if view.string != launcher.query && !view.hasMarkedText() {
+                view.string = launcher.query
+                view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+            }
+            view.focus()
+        }
+    }
+
+    private func apply(to view: LauncherTextView) {
+        view.textColor = textColor
+        view.insertionPointColor = caretColor
+        view.typingAttributes = [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: textColor]
+        let launcher = self.launcher
+        view.onChange = { text in launcher.setQuery(text) }
+        view.onCommand = { [weak view] selector in
+            switch selector {
+            case #selector(NSResponder.moveUp(_:)):
+                launcher.move(-1)
+            case #selector(NSResponder.moveDown(_:)):
+                launcher.move(1)
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertLineBreak(_:)):
+                launcher.activate()
+            case #selector(NSResponder.cancelOperation(_:)), #selector(NSTextView.complete(_:)):
+                launcher.cancel()
+            case #selector(NSResponder.insertTab(_:)):
+                _ = launcher.complete()
+            case #selector(NSResponder.moveRight(_:)):
+                // At the end of the text → takes the completion; else moves the caret.
+                guard let view, view.selectedRange().location == (view.string as NSString).length,
+                      launcher.complete() else { return false }
+            default:
+                return false
+            }
+            return true
+        }
+        view.onCommandKey = { event in
+            guard let chars = event.charactersIgnoringModifiers else { return false }
+            if chars == "\r" {
+                launcher.activate(alternate: true)
+                return true
+            }
+            if let digit = Int(chars), (1...9).contains(digit), digit <= launcher.results.count {
+                launcher.activate(index: digit - 1)
+                return true
+            }
+            return false
+        }
+    }
+}
+
+final class LauncherTextView: NSTextView {
+    var onChange: ((String) -> Void)?
+    /// Returns true when the launcher handled the command.
+    var onCommand: ((Selector) -> Bool)?
+    /// ⌘-key presses (⌘Return, ⌘1–⌘9).
+    var onCommandKey: ((NSEvent) -> Bool)?
+    var serial = -1
+
+    override var acceptsFirstResponder: Bool { true }
+
+    func focus() {
+        guard let window else { return }
+        if window.firstResponder !== self { window.makeFirstResponder(self) }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in self?.focus() }
+    }
+
+    override func doCommand(by selector: Selector) {
+        if onCommand?(selector) == true { return }
+        super.doCommand(by: selector)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command), window?.firstResponder === self, onCommandKey?(event) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        if let text = string as? String, text.contains(where: \.isNewline) {
+            super.insertText(text.replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " "), replacementRange: replacementRange)
+        } else {
+            super.insertText(string, replacementRange: replacementRange)
+        }
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        onChange?(string)
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        onChange?(self.string)
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        onChange?(string)
+    }
+}

@@ -173,6 +173,11 @@ struct IslandView: View {
                     .padding(.horizontal, max(model.contentPadding, 16))
                     .transition(fade)
             }
+            if model.phase == .launcher {
+                LauncherView(model: model, launcher: model.launcher)
+                    .frame(height: model.launcherHeight, alignment: .top)
+                    .transition(fade)
+            }
             if isHidden && model.showsIndicator {
                 MissedIndicator(model: model)
                     .frame(height: model.geometry.height)

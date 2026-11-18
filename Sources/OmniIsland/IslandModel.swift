@@ -13,6 +13,8 @@ enum IslandPhase: Equatable {
     /// Modifier held longer: workspace row plus clock, events and recent
     /// notifications.
     case dashboard
+    /// ⌥H: the island takes keyboard focus and searches apps and windows.
+    case launcher
 
     /// Phases that the modifier opened and that close when it is released.
     var isModifierPhase: Bool { self == .compact || self == .dashboard }
@@ -34,7 +36,7 @@ final class IslandModel: ObservableObject {
             // island while it grows for an event; hiding takes them back in.
             switch phase {
             case .compact, .dashboard: panelsOut = true
-            case .hidden: panelsOut = false
+            case .hidden, .launcher: panelsOut = false
             case .expanded, .notification: break
             }
         }
@@ -68,6 +70,11 @@ final class IslandModel: ObservableObject {
     @Published var systemIsDark = true
     /// Settings preview only: forces the light (true) or dark (false) look.
     @Published var lookOverride: Bool?
+    /// Search mode (phase .launcher).
+    let launcher = LauncherModel()
+    /// Height of the launcher below the workspace row, kept here so the
+    /// island's size animates with the result list.
+    @Published private(set) var launcherHeight: CGFloat = 0
     /// The settings window preview draws materials within its own window.
     var isPreview = false
 
@@ -95,7 +102,56 @@ final class IslandModel: ObservableObject {
     // MARK: - Inputs
 
     func apply(config: IslandConfig) {
+        launcher.config = config.launcher
         animate { self.config = config }
+        if phase == .launcher && !config.launcher.enabled { closeLauncher() }
+    }
+
+    // MARK: - Launcher
+
+    private var launcherWired = false
+
+    private func wireLauncher() {
+        guard !launcherWired else { return }
+        launcherWired = true
+        launcher.onLayoutChange = { [weak self] in
+            guard let self, self.phase == .launcher else { return }
+            let height = self.launcher.bodyHeight
+            guard height != self.launcherHeight else { return }
+            self.animate { self.launcherHeight = height }
+        }
+        launcher.onClose = { [weak self] in self?.closeLauncher() }
+    }
+
+    /// The hotkey: opens the launcher, or closes it when it is open.
+    func toggleLauncher() {
+        if phase == .launcher { closeLauncher() } else { openLauncher() }
+    }
+
+    func openLauncher() {
+        guard config.launcher.enabled, !isPreview else { return }
+        wireLauncher()
+        showWork?.cancel()
+        hideWork?.cancel()
+        dashboardWork?.cancel()
+        collapseWork?.cancel()
+        if phase == .notification { interruptNotification() }
+        clearMissed()
+        launcher.begin()
+        launcherHeight = launcher.bodyHeight
+        setPhase(.launcher)
+    }
+
+    func closeLauncher() {
+        guard phase == .launcher else { return }
+        pointerInside = false
+        setPhase(modifierHeld ? .compact : .hidden)
+        if !modifierHeld { showNextNotification() }
+    }
+
+    var launcherSize: CGSize {
+        let width = max(CGFloat(config.launcher.width), centerSize.width)
+        return CGSize(width: width, height: centerSize.height + launcherHeight)
     }
 
     func update(from tracker: WMStateTracker) {
@@ -219,7 +275,7 @@ final class IslandModel: ObservableObject {
     }
 
     /// Whether the island takes clicks right now.
-    var acceptsClicks: Bool { (phase.isModifierPhase || phase == .notification) && !isPreview }
+    var acceptsClicks: Bool { (phase.isModifierPhase || phase == .notification || phase == .launcher) && !isPreview }
 
     func setPointerInside(_ inside: Bool) {
         guard inside != pointerInside else { return }
@@ -790,7 +846,7 @@ final class IslandModel: ObservableObject {
         case .compact, .dashboard: return true
         // As separate drops the panels can stay beside a taller island.
         case .expanded, .notification: return usesLiquid && panelsOut
-        case .hidden: return false
+        case .hidden, .launcher: return false
         }
     }
 
@@ -871,6 +927,7 @@ final class IslandModel: ObservableObject {
         case .expanded: return withPanels(expandedSize)
         case .notification: return withPanels(notificationSize)
         case .dashboard: return dashboardSize
+        case .launcher: return launcherSize
         }
     }
 
@@ -893,7 +950,11 @@ final class IslandModel: ObservableObject {
         // Liquid panels can also sit beside the event sizes.
         let extra = usesLiquid ? side : 0
         let events = [expandedSize, notificationSize].map { CGSize(width: $0.width + extra, height: $0.height) }
-        let sizes = events + [compactSize, dashboardSize, shifted]
+        var sizes = events + [compactSize, dashboardSize, shifted]
+        if config.launcher.enabled {
+            sizes.append(CGSize(width: max(CGFloat(config.launcher.width), centerSize.width),
+                                height: centerSize.height + launcher.maximumBodyHeight))
+        }
         let height = (sizes.map(\.height).max() ?? 0) + (isFloating ? floatingTop : 0)
         let width = sizes.map(\.width).max() ?? 0
         return CGSize(width: max(width, 520), height: max(height, geometry.height))
@@ -919,6 +980,8 @@ final class IslandModel: ObservableObject {
     // MARK: - State machine
 
     private func show(_ event: IslandEvent) {
+        // The search field keeps its place; the workspace row still updates.
+        guard phase != .launcher else { return }
         collapseWork?.cancel()
         if phase == .notification {
             notificationWork?.cancel()

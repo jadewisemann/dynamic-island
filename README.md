@@ -9,6 +9,8 @@
 
 OmniWM 내장 워크스페이스 바와 달리 macOS의 "동작 줄이기"나 OmniWM 애니메이션 설정과 상관없이 동작합니다.
 
+- **⌥H를 누르면** 아일랜드가 펼쳐지면서 검색창이 열립니다. 바로 입력하면 앱, OmniWM에 열려 있는 창, 계산 결과가 아일랜드 아래로 붙습니다. 자세한 내용은 아래 [런처](#런처)를 보세요.
+
 ## 요구 사항
 
 - macOS 14 이상 (macOS 26 Tahoe, Apple Silicon에서 사용하는 것을 기준으로 작성했습니다)
@@ -149,6 +151,11 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `calendar.enabled` / `calendars` | `false` / `[]` | 캘린더 일정을 읽습니다. 켜면 캘린더 접근 권한을 묻습니다. 비워 두면 모든 캘린더를 씁니다. |
 | `calendar.alertMinutes` / `showAlerts` / `includeAllDay` | `[5, 0]` / `true` / `false` | 일정 시작 몇 분 전에 카드를 띄울지 정합니다. |
 | `dashboard.enabled` / `holdMs` / `items` | `false` / `800` / `["clock", "events", "notifications"]` | 트리거 키를 더 오래 누르면 큰 시계, 오늘 남은 일정, 최근 알림을 보여 줍니다. |
+| `launcher.enabled` / `hotkey` | `true` / `"option+h"` | 런처를 켜고 끄며, 여는 단축키를 정합니다. `option+space`, `control+space`처럼 적습니다. |
+| `launcher.maxResults` | `8` | 한 번에 보여 줄 최대 결과 수입니다. |
+| `launcher.showRecent` / `recentCount` | `true` / `5` | 검색어가 없을 때 최근에 연 앱을 보여 줍니다. |
+| `launcher.searchApps` / `searchWindows` / `calculator` | `true` | 검색 대상을 종류별로 켜고 끕니다. |
+| `launcher.width` | `560` | 런처가 열렸을 때 아일랜드의 너비입니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
 | `animation.durationMs` | `380` | `spring`이 아닌 스타일의 재생 시간입니다. |
@@ -167,6 +174,26 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
   "appearance": { "accentColor": "#FF9F0A", "expandedWidth": 440 },
 }
 ```
+
+## 런처
+
+Option을 누르고 있으면 평소처럼 아일랜드가 내려오고, 이어서 H를 누르면(⌥H) 아일랜드가 넓어지면서 키보드 입력을 받습니다. 이때부터는 Option을 떼도 닫히지 않습니다. 앱은 계속 원래 쓰던 앱이 활성 상태로 남고, 아일랜드만 입력을 받습니다.
+
+- **검색 대상**: `/Applications`, `/System/Applications`, `~/Applications` 등에 있는 앱(한글 이름과 영어 이름 모두, `ㄱㅅㄱ`처럼 초성으로도 찾습니다), OmniWM에 열려 있는 창(앱 이름이나 창 제목), `2^10*3` 같은 수식입니다.
+- **순위**: 이름 전체 일치, 앞부분 일치, 단어 시작 일치, 머리글자(`vsc` → Visual Studio Code), 중간 일치, 글자 순서 일치, 오타(`chorme` → Chrome) 순서로 점수를 매기고, 런처에서 자주 연 앱일수록 위로 올립니다. 실행 기록은 `~/.config/omni-island/launcher-history.json`에 저장됩니다.
+- **검색어가 없을 때**: 최근에 연 앱 5개를 보여 줍니다. 아직 기록이 없으면 실행 중인 앱으로 채웁니다.
+
+| 키 | 동작 |
+|---|---|
+| ⌥H | 열기와 닫기 |
+| ↑ ↓, ⌃P ⌃N | 선택 이동 |
+| Return | 앱 열기, 창으로 이동, 계산 결과 복사 |
+| ⌘Return | 앱은 Finder에서 보기, 창은 지금 워크스페이스로 불러오기 |
+| ⌘1 – ⌘9 | 해당 줄 바로 실행 |
+| Tab, → (커서가 끝에 있을 때) | 첫 번째 결과의 이름으로 자동 완성 |
+| Esc | 검색어 지우기, 한 번 더 누르면 닫기 |
+
+다른 앱이나 창을 클릭해도 런처가 닫힙니다. 단축키는 Carbon 핫키로 등록하므로 손쉬운 사용 권한이 없어도 동작하고, ⌥H가 다른 앱에 "˙"로 입력되지도 않습니다. OmniWM에서 같은 단축키를 쓰고 있다면 설정 → 런처에서 단축키를 바꿔 주세요.
 
 ## 알림과 일정
 

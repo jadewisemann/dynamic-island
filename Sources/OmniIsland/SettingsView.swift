@@ -236,6 +236,8 @@ struct SettingsView: View {
                     .tabItem { Label("표시 요소", systemImage: "square.grid.2x2") }
                 NotificationSettings(model: model)
                     .tabItem { Label("알림·일정", systemImage: "bell.badge") }
+                LauncherSettings(model: model)
+                    .tabItem { Label("런처", systemImage: "magnifyingglass") }
                 AnimationSettings(model: model)
                     .tabItem { Label("애니메이션", systemImage: "wand.and.stars") }
                 ConnectionSettings(model: model)
@@ -1142,6 +1144,68 @@ private struct NotificationSettings: View {
 }
 
 // MARK: - Animation tab
+
+private struct LauncherSettings: View {
+    @ObservedObject var model: SettingsModel
+
+    private static let hotkeys: [(String, String)] = [
+        ("option+h", "⌥H"),
+        ("option+space", "⌥Space"),
+        ("control+space", "⌃Space"),
+        ("option+command+space", "⌥⌘Space"),
+        ("option+k", "⌥K"),
+        ("control+option+space", "⌃⌥Space"),
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("런처 사용", isOn: $model.draft.launcher.enabled)
+                Picker("단축키", selection: $model.draft.launcher.hotkey) {
+                    ForEach(hotkeyOptions, id: \.0) { option in
+                        Text(option.1).tag(option.0)
+                    }
+                }
+                .disabled(!model.draft.launcher.enabled)
+                Text("Option을 누르고 있으면 아일랜드가 나타나고, 이어서 H를 누르면 검색창이 열립니다. 바로 입력하면 결과가 아래로 붙습니다. ↑↓로 고르고 Return으로 실행하며, Esc를 누르면 검색어를 지우고 한 번 더 누르면 닫힙니다.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("열기")
+            }
+
+            Section("검색 대상") {
+                Toggle("앱", isOn: $model.draft.launcher.searchApps)
+                Toggle("OmniWM에 열려 있는 창", isOn: $model.draft.launcher.searchWindows)
+                Text("창은 Return을 누르면 그 창으로 이동하고, ⌘Return을 누르면 지금 워크스페이스로 불러옵니다. 앱은 ⌘Return을 누르면 Finder에서 보여 줍니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("계산기 (2^10*3 같은 수식)", isOn: $model.draft.launcher.calculator)
+            }
+            .disabled(!model.draft.launcher.enabled)
+
+            Section("표시") {
+                SliderRow(title: "최대 결과 수", value: $model.draft.launcher.maxResults,
+                          range: 3...12, step: 1)
+                Toggle("검색어가 없을 때 최근에 연 앱 보여 주기", isOn: $model.draft.launcher.showRecent)
+                if model.draft.launcher.showRecent {
+                    SliderRow(title: "최근 앱 개수", value: $model.draft.launcher.recentCount,
+                              range: 1...10, step: 1)
+                }
+                SliderRow(title: "펼친 너비", value: $model.draft.launcher.width,
+                          range: 400...800, step: 10, unit: "pt")
+            }
+            .disabled(!model.draft.launcher.enabled)
+        }
+        .formStyle(.grouped)
+    }
+
+    private var hotkeyOptions: [(String, String)] {
+        let current = model.draft.launcher.hotkey
+        if Self.hotkeys.contains(where: { $0.0 == current }) { return Self.hotkeys }
+        return Self.hotkeys + [(current, "사용자 지정: \(HotKeyMonitor.symbols(current))")]
+    }
+}
 
 private struct AnimationSettings: View {
     @ObservedObject var model: SettingsModel
