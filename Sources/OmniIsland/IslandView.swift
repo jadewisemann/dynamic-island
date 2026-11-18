@@ -45,20 +45,21 @@ struct IslandView: View {
         let topInset = isHidden || model.isFloating ? 0 : CGFloat(a.topCornerRadius)
 
         HStack(alignment: .top, spacing: 0) {
-            if model.showsSidePanels {
+            if model.showsSidePanels && model.leftPanelWidth > 0 {
                 SidePanel(model: model, items: model.leftPanelItems, edge: .leading)
-                    .frame(width: model.sidePanelWidth, height: model.panelUnit)
+                    .frame(width: model.leftPanelWidth, height: model.panelUnit)
                     .transition(fade)
             }
             centerColumn
                 .frame(maxWidth: .infinity)
-            if model.showsSidePanels {
+            if model.showsSidePanels && model.rightPanelWidth > 0 {
                 SidePanel(model: model, items: model.rightPanelItems, edge: .trailing)
-                    .frame(width: model.sidePanelWidth, height: model.panelUnit)
+                    .frame(width: model.rightPanelWidth, height: model.panelUnit)
                     .transition(fade)
             }
         }
-        .padding(.horizontal, model.showsSidePanels ? 0 : topInset)
+        .padding(.leading, model.showsSidePanels && model.leftPanelWidth > 0 ? 0 : topInset)
+        .padding(.trailing, model.showsSidePanels && model.rightPanelWidth > 0 ? 0 : topInset)
         .frame(width: size.width, height: size.height, alignment: .top)
         .background {
             IslandBackground(model: model, solidBlack: isHidden && !model.hiddenStyleFades)
@@ -84,6 +85,7 @@ struct IslandView: View {
         .modifier(PopEffect(trigger: model.config.motion.popOnEvent ? model.eventSerial : 0))
         .foregroundStyle(model.palette.text)
         .padding(.top, model.currentTopOffset)
+        .offset(x: model.horizontalPosition == "center" ? model.panelOffset : 0)
     }
 
     /// Notch strip, workspace row and whatever the phase adds below it.

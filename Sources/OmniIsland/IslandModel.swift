@@ -658,17 +658,24 @@ final class IslandModel: ObservableObject {
     var leftPanelItems: [String] { config.widgets.leftPanel.filter { !$0.isEmpty } }
     var rightPanelItems: [String] { config.widgets.rightPanel.filter { !$0.isEmpty } }
 
-    /// Width of one side panel. Both sides use the wider of the two so the
-    /// workspace row stays centered under the notch.
-    var sidePanelWidth: CGFloat {
+    private func panelWidth(_ items: [String]) -> CGFloat {
+        guard !items.isEmpty else { return 0 }
         let units = min(max(Int(config.widgets.panelUnits.rounded()), 1), 3)
-        let count = max(leftPanelItems.count, rightPanelItems.count)
-        guard count > 0 else { return 0 }
-        return CGFloat(max(units, count)) * panelUnit
+        return CGFloat(max(units, items.count)) * panelUnit
     }
 
+    /// Each side is sized on its own; an empty side has no panel at all.
+    var leftPanelWidth: CGFloat { panelWidth(leftPanelItems) }
+    var rightPanelWidth: CGFloat { panelWidth(rightPanelItems) }
+
     var showsSidePanels: Bool {
-        (phase == .compact || phase == .dashboard) && sidePanelWidth > 0
+        (phase == .compact || phase == .dashboard) && leftPanelWidth + rightPanelWidth > 0
+    }
+
+    /// Shift that keeps the workspace row under the notch when the two
+    /// panels differ in width (e.g. a panel on the right only).
+    var panelOffset: CGFloat {
+        showsSidePanels ? (rightPanelWidth - leftPanelWidth) / 2 : 0
     }
 
     /// The workspace row part of the island, without side panels.
@@ -687,12 +694,12 @@ final class IslandModel: ObservableObject {
 
     var compactSize: CGSize {
         let center = centerSize
-        return CGSize(width: center.width + 2 * sidePanelWidth, height: center.height)
+        return CGSize(width: center.width + leftPanelWidth + rightPanelWidth, height: center.height)
     }
 
     /// Width available to the middle column in the current phase.
     var centerWidth: CGFloat {
-        showsSidePanels ? currentSize.width - 2 * sidePanelWidth : currentSize.width
+        showsSidePanels ? currentSize.width - leftPanelWidth - rightPanelWidth : currentSize.width
     }
 
     var expandedSize: CGSize {
@@ -739,7 +746,9 @@ final class IslandModel: ObservableObject {
     /// Largest size the island can take, including the floating gap; the
     /// panel is sized from this.
     var maximumSize: CGSize {
-        let sizes = [expandedSize, compactSize, notificationSize, dashboardSize]
+        // Room for the offset when only one side has a panel.
+        let shifted = CGSize(width: centerSize.width + 2 * max(leftPanelWidth, rightPanelWidth), height: 0)
+        let sizes = [expandedSize, compactSize, notificationSize, dashboardSize, shifted]
         let height = (sizes.map(\.height).max() ?? 0) + (isFloating ? floatingTop : 0)
         let width = sizes.map(\.width).max() ?? 0
         return CGSize(width: max(width, 520), height: max(height, geometry.height))

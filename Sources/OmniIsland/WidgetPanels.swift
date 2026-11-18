@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Square widget tiles attached to one side of the island (widgets.leftPanel
-/// / rightPanel). The panel is `sidePanelWidth` wide; its widgets share it.
+/// / rightPanel). Each side is sized on its own; its widgets share it.
 struct SidePanel: View {
     @ObservedObject var model: IslandModel
     let items: [String]

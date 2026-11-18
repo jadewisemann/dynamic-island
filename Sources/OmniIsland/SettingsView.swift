@@ -901,7 +901,7 @@ private struct PanelSlotEditor: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
                 side(\.rightPanel, count: count)
             }
-            Text("칸을 눌러 넣을 위젯을 고릅니다.")
+            Text("칸을 눌러 위젯을 고르거나 비웁니다. 한쪽을 모두 비우면 그쪽에는 칸이 생기지 않습니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
