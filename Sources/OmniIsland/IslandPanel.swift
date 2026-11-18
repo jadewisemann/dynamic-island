@@ -36,6 +36,8 @@ final class IslandPanel: NSPanel {
 
 @MainActor
 final class IslandWindowController {
+    /// Room around the island inside the panel for the shadow and the pop effect.
+    static let panelMargin: CGFloat = 60
     let model: IslandModel
     private let panel = IslandPanel()
     private var screenObserver: NSObjectProtocol?
@@ -77,12 +79,23 @@ final class IslandWindowController {
         if geometry != model.geometry { model.geometry = geometry }
 
         let maxSize = model.maximumSize
-        let margin: CGFloat = 60 // room for the shadow and the pop effect
+        let margin = Self.panelMargin
         let width = min(maxSize.width + margin * 2, target.frame.width)
         let height = maxSize.height + margin
-        let centerX = Self.notchCenterX(for: target)
+        let layout = model.config.layout
+        let offset = geometry.hasNotch ? 0 : CGFloat(layout.horizontalOffset)
+        let edgeInset: CGFloat = 8
+        let x: CGFloat
+        switch model.horizontalPosition {
+        case "left":
+            x = target.frame.minX + edgeInset + offset - margin
+        case "right":
+            x = target.frame.maxX - edgeInset + offset + margin - width
+        default:
+            x = Self.notchCenterX(for: target) + offset - width / 2
+        }
         let frame = NSRect(
-            x: centerX - width / 2,
+            x: x,
             y: target.frame.maxY - height,
             width: width,
             height: height
