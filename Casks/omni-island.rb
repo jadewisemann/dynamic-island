@@ -13,7 +13,7 @@ cask "omni-island" do
   homepage "https://github.com/jadewisemann/dynamic-island"
 
   conflicts_with cask: "omni-island@nightly"
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "OmniIsland.app"
   # The app's executable doubles as the `omni-island` command (notify, hook).
@@ -21,11 +21,10 @@ cask "omni-island" do
 
   # The app is signed with a self-signed certificate, not notarized by Apple,
   # so Gatekeeper would refuse to open it while it carries the quarantine flag.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/OmniIsland.app"],
-                   must_succeed: false
-    system_command "/usr/bin/open", args: ["#{appdir}/OmniIsland.app"], must_succeed: false
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/OmniIsland.app"],
+                          must_succeed: false
+    run "/usr/bin/open", args: ["{{appdir}}/OmniIsland.app"], must_succeed: false
   end
 
   uninstall quit: "io.github.jadewisemann.omni-island"
