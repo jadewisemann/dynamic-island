@@ -221,11 +221,19 @@ private struct LiquidTrail {
     var neck: Path?
     var isSettled: Bool
 
-    init(from: CGRect, to: CGRect, elapsed: Double, speed: Double, tailScale: CGFloat) {
+    /// `tailScale` nil gives a single drop with no tail: one shape that
+    /// moves and stops, nothing left behind to catch up.
+    init(from: CGRect, to: CGRect, elapsed: Double, speed: Double, tailScale: CGFloat?) {
         let t = elapsed * speed
-        let hp = springProgress(t, period: 0.42, damping: 0.68)
-        let tp = springProgress(t - 0.04, period: 0.78, damping: 0.9)
+        // Nearly critically damped, so the shapes land without wobbling.
+        let hp = springProgress(t, period: 0.36, damping: 0.9)
         head = lerp(from, to, hp)
+        guard let tailScale else {
+            tail = head
+            isSettled = t > Self.settleTime
+            return
+        }
+        let tp = springProgress(t - 0.03, period: 0.5, damping: 1)
         let stretch = min(abs(hp - tp), 1)
         let base = lerp(from, to, tp)
         let scale = 1 - tailScale * stretch
@@ -235,7 +243,7 @@ private struct LiquidTrail {
             width: base.width * scale,
             height: base.height * scale
         )
-        isSettled = t > 1.6
+        isSettled = t > Self.settleTime
         let distance = hypot(head.midX - tail.midX, head.midY - tail.midY)
         let thickness = min(head.height, tail.height) * 0.55 * max(0, 1 - distance / 160)
         if thickness > 1, distance > 1 {
@@ -245,6 +253,9 @@ private struct LiquidTrail {
             neck = p.strokedPath(StrokeStyle(lineWidth: thickness, lineCap: .round))
         }
     }
+
+    /// Time after which both springs are within a pixel of the target.
+    static let settleTime: Double = 0.75
 }
 
 /// Liquid layer behind the workspace row: the active workspace highlight
@@ -263,15 +274,15 @@ struct RowLiquid: View {
     @State private var animationToken = 0
 
     private struct Drop {
-        let app: AppRef?
+        let toKey: String
         let from: CGRect
         let to: CGRect
         let start: Date
     }
 
     private static let gooBlur: CGFloat = 4
-    private static let dropDelay: Double = 0.12
-    private static let duration: Double = 1.6
+    private static let dropDelay: Double = 0
+    private static let duration: Double = LiquidTrail.settleTime
 
     private var drawsHighlight: Bool { model.usesLiquid && model.activeStyle == .fill }
 
@@ -288,6 +299,9 @@ struct RowLiquid: View {
         }
         .allowsHitTesting(false)
         .onChange(of: model.activeWorkspaceKey) { old, _ in
+            // A window that moves with the focus is already shown by the
+            // highlight travelling there; a second drop would just crowd it.
+            if let new = model.activeWorkspaceKey, drop?.toKey == new { drop = nil }
             guard drawsHighlight, let old, let from = frames[old] else { return }
             highlightFrom = from
             highlightStart = .now
@@ -295,10 +309,11 @@ struct RowLiquid: View {
         }
         .onChange(of: model.eventSerial) { _, _ in
             guard model.config.behavior.windowMoveTrail, let event = model.event,
-                  case .windowMove(let app, _, let from?, let to, _) = event,
-                  let fromRect = frames[from.key], let toRect = frames[to.key], from.key != to.key
+                  case .windowMove(_, _, let from?, let to, _) = event,
+                  let fromRect = frames[from.key], let toRect = frames[to.key], from.key != to.key,
+                  !(drawsHighlight && model.activeWorkspaceKey == to.key)
             else { return }
-            drop = Drop(app: app, from: fromRect, to: toRect, start: .now.addingTimeInterval(Self.dropDelay))
+            drop = Drop(toKey: to.key, from: fromRect, to: toRect, start: .now.addingTimeInterval(Self.dropDelay))
             run()
         }
     }
@@ -328,7 +343,7 @@ struct RowLiquid: View {
         }
         let dropTrail = drop.map { d in
             LiquidTrail(from: dropRect(d.from), to: dropRect(d.to),
-                        elapsed: now.timeIntervalSince(d.start), speed: speed, tailScale: 0.6)
+                        elapsed: now.timeIntervalSince(d.start), speed: speed, tailScale: nil)
         }
         let radius = cornerRadius
         let glow = accent.opacity(model.colors.activeGlow ? 0.55 : 0)
@@ -344,7 +359,7 @@ struct RowLiquid: View {
             if let dropTrail, let drop, now >= drop.start {
                 let fade = dropFade(dropTrail, drop: drop, now: now)
                 Canvas { ctx, _ in
-                    Self.draw(dropTrail, radius: nil, color: accent, settled: false, in: &ctx)
+                    Self.draw(dropTrail, radius: nil, color: accent, settled: true, in: &ctx)
                 }
                 .opacity(0.4 * fade)
             }
@@ -354,7 +369,7 @@ struct RowLiquid: View {
     /// The drop fades as it lands.
     private func dropFade(_ trail: LiquidTrail, drop: Drop, now: Date) -> Double {
         let t = now.timeIntervalSince(drop.start) * speed
-        return t < 0.45 ? 1 : max(0, 1 - (t - 0.45) / 0.25)
+        return t < 0.35 ? 1 : max(0, 1 - (t - 0.35) / 0.2)
     }
 
     /// A round drop about the size of an app icon, centered on a workspace.
