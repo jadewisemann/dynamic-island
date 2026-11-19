@@ -84,6 +84,9 @@ struct WindowSnapshot: Decodable, Equatable {
     /// "tiling" or "floating".
     let mode: String?
     let pid: Int?
+    /// One-based Niri column of a tiled window (tabs share their column's
+    /// index); absent for floating and Dwindle windows.
+    var columnIndex: Int? = nil
 
     var isFloating: Bool { mode?.lowercased() == "floating" }
 }

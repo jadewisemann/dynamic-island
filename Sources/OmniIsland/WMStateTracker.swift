@@ -203,8 +203,7 @@ final class WMStateTracker {
         apps.filter { !$0.isFloating } + apps.filter(\.isFloating)
     }
 
-    /// workspace key → one entry per window, in layout order. Windows of
-    /// the same app are kept next to each other so their icons stay grouped.
+    /// workspace key → one entry per window, in layout order.
     func windowsGroupedByWorkspace() -> [String: [WorkspaceApp]] {
         var result: [String: [WorkspaceApp]] = [:]
         var perApp: [String: Int] = [:]
@@ -227,15 +226,7 @@ final class WMStateTracker {
                 windowIds: window.id.map { [$0] } ?? [],
                 focusedWindowId: focused ? window.id : nil
             )
-            var list = result[wsKey] ?? []
-            if let last = list.lastIndex(where: {
-                $0.bundleId == bundleId && $0.name == name && $0.isFloating == floating
-            }) {
-                list.insert(entry, at: last + 1)
-            } else {
-                list.append(entry)
-            }
-            result[wsKey] = list
+            result[wsKey, default: []].append(entry)
         }
         return result.mapValues(Self.tiledFirst)
     }
@@ -273,6 +264,25 @@ final class WMStateTracker {
         onStateChange?()
     }
 
+    /// The snapshot in the order the windows sit on screen: workspaces as
+    /// OmniWM lists them, then tiled windows by Niri column (tiles of one
+    /// column in OmniWM's order), then floating windows. OmniWM's own order
+    /// follows the layout only in newer versions, so the column index decides.
+    static func layoutOrdered(_ windows: [WindowSnapshot]) -> [WindowSnapshot] {
+        var workspaceRank: [String: Int] = [:]
+        for w in windows {
+            let key = w.workspace?.key ?? ""
+            if workspaceRank[key] == nil { workspaceRank[key] = workspaceRank.count }
+        }
+        return windows.enumerated().sorted { a, b in
+            let ka = (workspaceRank[a.element.workspace?.key ?? ""] ?? 0, a.element.isFloating ? 1 : 0,
+                      a.element.columnIndex ?? Int.max, a.offset)
+            let kb = (workspaceRank[b.element.workspace?.key ?? ""] ?? 0, b.element.isFloating ? 1 : 0,
+                      b.element.columnIndex ?? Int.max, b.offset)
+            return ka < kb
+        }.map(\.element)
+    }
+
     private func handleWindows(_ windows: [WindowSnapshot]) {
         var nextWorkspace: [String: WorkspaceRef] = [:]
         var nextInfo: [String: WindowSnapshot] = [:]
@@ -304,7 +314,7 @@ final class WMStateTracker {
 
         windowWorkspace = nextWorkspace
         windowInfo = nextInfo
-        self.windows = windows
+        self.windows = Self.layoutOrdered(windows)
         hasWindowBaseline = true
         if let focused = windows.first(where: { $0.isFocused == true }) {
             focusedApp = focused.app ?? focusedApp
