@@ -315,16 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeys.onPress = { [weak self] in self?.model.toggleLauncher() }
         configureLauncher(configStore.config)
         let launcher = model.launcher
-        launcher.windowsProvider = { [weak self] in
-            guard let self else { return [] }
-            return self.tracker.windows.compactMap { w -> LauncherWindow? in
-                guard let id = w.id, w.isScratchpad != true else { return nil }
-                return LauncherWindow(id: id, appName: w.app?.name ?? "?", bundleId: w.app?.bundleId,
-                                      title: w.title ?? "", workspaceLabel: w.workspace.map {
-                                          self.model.label(for: $0)
-                                      } ?? "?")
-            }
-        }
+        launcher.windowsProvider = { [weak self] in self?.launcherWindows() ?? [] }
         launcher.onOpenApp = { app in
             NSWorkspace.shared.openApplication(at: app.url, configuration: NSWorkspace.OpenConfiguration())
         }
@@ -347,6 +338,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         launcher.onSummonWindow = { [weak self] window in
             self?.runWindowCommand(["window", "summon-right", window.id], fallbackBundleId: window.bundleId)
         }
+    }
+
+    /// Open windows for the launcher: by workspace (number, then OmniWM's
+    /// workspace order), then in layout order within the workspace.
+    private func launcherWindows() -> [LauncherWindow] {
+        let workspaceIndex = Dictionary(
+            tracker.workspaces.enumerated().map { ($0.element.ref.key, $0.offset) },
+            uniquingKeysWith: { first, _ in first })
+        var rows: [(window: LauncherWindow, key: (Int, Int, Int))] = []
+        for (offset, w) in tracker.windows.enumerated() {
+            guard let id = w.id, w.isScratchpad != true else { continue }
+            let ws = w.workspace
+            let window = LauncherWindow(id: id, appName: w.app?.name ?? "?", bundleId: w.app?.bundleId,
+                                        title: w.title ?? "",
+                                        workspaceLabel: ws.map { model.label(for: $0) } ?? "?")
+            let key = (ws?.number ?? Int.max,
+                       ws.flatMap { workspaceIndex[$0.key] } ?? Int.max,
+                       offset)
+            rows.append((window, key))
+        }
+        return rows.sorted { $0.key < $1.key }.map(\.window)
     }
 
     private func configureShelf(_ config: IslandConfig) {
