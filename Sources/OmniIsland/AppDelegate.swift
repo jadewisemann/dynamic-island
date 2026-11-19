@@ -33,6 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let socketServer = IslandSocketServer()
     private let agents = AgentMonitor()
     private let shelf = ClipboardShelf()
+    /// When each OmniWM window was first seen, so the launcher lists the
+    /// windows of a workspace in the same order every time.
+    private var windowSequence: [String: Int] = [:]
+    private var nextWindowSequence = 0
     private var windowController: IslandWindowController?
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
@@ -315,16 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeys.onPress = { [weak self] in self?.model.toggleLauncher() }
         configureLauncher(configStore.config)
         let launcher = model.launcher
-        launcher.windowsProvider = { [weak self] in
-            guard let self else { return [] }
-            return self.tracker.windows.compactMap { w -> LauncherWindow? in
-                guard let id = w.id, w.isScratchpad != true else { return nil }
-                return LauncherWindow(id: id, appName: w.app?.name ?? "?", bundleId: w.app?.bundleId,
-                                      title: w.title ?? "", workspaceLabel: w.workspace.map {
-                                          self.model.label(for: $0)
-                                      } ?? "?")
-            }
-        }
+        launcher.windowsProvider = { [weak self] in self?.launcherWindows() ?? [] }
         launcher.onOpenApp = { app in
             NSWorkspace.shared.openApplication(at: app.url, configuration: NSWorkspace.OpenConfiguration())
         }
@@ -347,6 +342,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         launcher.onSummonWindow = { [weak self] window in
             self?.runWindowCommand(["window", "summon-right", window.id], fallbackBundleId: window.bundleId)
         }
+    }
+
+    /// Open windows for the launcher, in a fixed order: by workspace (number,
+    /// then OmniWM's workspace order), then tiled before floating, then in the
+    /// order the windows first appeared. OmniWM's snapshot order alone can
+    /// change between updates.
+    private func launcherWindows() -> [LauncherWindow] {
+        let workspaceIndex = Dictionary(
+            tracker.workspaces.enumerated().map { ($0.element.ref.key, $0.offset) },
+            uniquingKeysWith: { first, _ in first })
+        var present = Set<String>()
+        var rows: [(window: LauncherWindow, key: (Int, Int, Int, Int))] = []
+        for w in tracker.windows {
+            guard let id = w.id, w.isScratchpad != true else { continue }
+            present.insert(id)
+            if windowSequence[id] == nil {
+                windowSequence[id] = nextWindowSequence
+                nextWindowSequence += 1
+            }
+            let ws = w.workspace
+            let window = LauncherWindow(id: id, appName: w.app?.name ?? "?", bundleId: w.app?.bundleId,
+                                        title: w.title ?? "",
+                                        workspaceLabel: ws.map { model.label(for: $0) } ?? "?")
+            let key = (ws?.number ?? Int.max,
+                       ws.flatMap { workspaceIndex[$0.key] } ?? Int.max,
+                       w.isFloating ? 1 : 0,
+                       windowSequence[id] ?? Int.max)
+            rows.append((window, key))
+        }
+        windowSequence = windowSequence.filter { present.contains($0.key) }
+        return rows.sorted { $0.key < $1.key }.map(\.window)
     }
 
     private func configureShelf(_ config: IslandConfig) {
