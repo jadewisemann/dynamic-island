@@ -37,7 +37,7 @@ struct LauncherItem: Identifiable, Equatable {
     let subtitle: String?
     /// Character offsets of `title` the query matched.
     let hits: [Int]
-    let score: Int
+    var score: Int
     /// Heading drawn above the first row of a group ("최근에 연 앱").
     var section: String? = nil
     var group: Group = .local
@@ -77,6 +77,8 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var marked: [LauncherItem] = []
 
     let apps = AppIndex()
+    /// What was picked after typing what; lifts those rows next time.
+    lazy var picks = LauncherPicks(seed: { self.apps.pickSeed() })
     var config = IslandConfig.Launcher()
     /// Open windows from OmniWM, in workspace order.
     var windowsProvider: (() -> [LauncherWindow])?
@@ -328,6 +330,9 @@ final class LauncherModel: ObservableObject {
             return
         }
         guard let target = plugin(id: first.plugin), target.canActivate(first) else { return }
+        if config.learnFromPicks {
+            for item in items where item.group == .local { picks.record(item.id, query: trimmedQuery) }
+        }
         onClose?()
         target.activate(items, alternate: alternate)
     }
@@ -410,6 +415,10 @@ final class LauncherModel: ObservableObject {
         }
         let entries = pluginRows(q)
         items += entries.matched
+        // Rows picked before, above all after typing this same query, rise.
+        if config.learnFromPicks {
+            for i in items.indices { items[i].score += picks.boost(items[i].id, query: q) }
+        }
         items.sort { a, b in
             a.score != b.score ? a.score > b.score
                 : a.title.localizedStandardCompare(b.title) == .orderedAscending

@@ -183,6 +183,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `launcher.width` | `560` | 런처가 열렸을 때 아일랜드의 너비입니다. |
 | `launcher.prefixes` | `{ "clipboard": "c", "windows": "w", "settings": "s", "files": "f", "apps": "" }` | 내장 앱의 트리거 접두어입니다. `""`이면 접두어를 쓰지 않습니다. |
 | `launcher.searchClipboard` | `false` | 복사 기록도 기본 검색에 섞어서 보여 줍니다. |
+| `launcher.learnFromPicks` | `true` | 고른 결과를 학습해서, 자주 고른 항목과 같은 검색어로 골랐던 항목을 위로 올립니다. |
 | `shelf.enabled` / `maxItems` | `true` / `30` | 클립보드 관리자가 복사 기록을 남길지와 기억할 개수입니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
 | `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
@@ -214,7 +215,8 @@ Option을 누르고 있으면 평소처럼 아일랜드가 내려오고, 이어�
   - 파일: 홈 폴더의 파일과 폴더를 Spotlight 색인에서 찾습니다. ⌘Return을 누르면 Finder에서 보여 줍니다.
   - 계산기와 환율: `2^10*3`, `0xC00`, `100 USD to KRW`, `100달러`, `5000엔`처럼 입력합니다. 환율은 [Frankfurter](https://www.frankfurter.app)의 ECB 일일 환율이며, Return을 누르면 결과를 복사합니다.
   - 웹: 맨 아래에 "Google에서 검색" 줄과 Google 추천 검색어가 붙습니다. `github.com/x`처럼 주소를 입력하면 바로 열 수 있고, 설정에서 Claude, Grok, X 줄을 켤 수 있습니다. 추천 검색어는 입력한 글자를 Google에 보내므로 끌 수 있고, 주소처럼 보이는 입력(점, 슬래시, @)은 보내지 않습니다.
-- **순위**: 이름 전체 일치, 앞부분 일치, 단어 시작 일치, 머리글자(`vsc` → Visual Studio Code), 중간 일치, 글자 순서 일치, 오타(`chorme` → Chrome) 순서로 점수를 매기고, 런처에서 자주 연 앱일수록 위로 올립니다. 실행 기록은 `~/.config/omni-island/launcher-history.json`에 저장됩니다.
+- **순위**: 이름 전체 일치, 앞부분 일치, 단어 시작 일치, 머리글자(`vsc` → Visual Studio Code), 중간 일치, 글자 순서 일치, 오타(`chorme` → Chrome) 순서로 점수를 매깁니다. 앱 이름 검색의 실행 기록은 `~/.config/omni-island/launcher-history.json`에 저장됩니다.
+- **학습**: Raycast나 Alfred처럼, 런처에서 고른 결과를 기억해서 순위에 반영합니다. 앱, 창, 시스템 설정, 파일, 클립보드 등 종류와 관계없이 자주, 최근에 고른 항목일수록 위로 오르고(오래된 선택은 2주마다 절반씩 약해집니다), 같은 검색어(또는 그보다 짧게 쳤던 검색어)로 골랐던 항목은 이름이 더 비슷한 다른 항목보다도 위로 올라갈 수 있습니다. 계산기, 환율 같은 답과 웹 검색 줄의 위치는 바뀌지 않습니다. 기록은 `~/.config/omni-island/launcher-picks.json`에 저장되며, `launcher.learnFromPicks`를 `false`로 두면 학습을 끕니다.
 - **검색어가 없을 때**: 최근에 연 앱 5개를 보여 줍니다. 아직 기록이 없으면 실행 중인 앱으로 채웁니다.
 
 ### 내장 앱과 트리거 접두어

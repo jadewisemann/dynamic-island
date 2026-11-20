@@ -1219,6 +1219,7 @@ private struct LauncherSettings: View {
                     SliderRow(title: "파일 결과 수", value: $model.draft.launcher.maxFiles, range: 1...8, step: 1)
                 }
                 Toggle("클립보드 기록", isOn: $model.draft.launcher.searchClipboard)
+                Toggle("고른 결과를 학습해서 위로 올리기", isOn: $model.draft.launcher.learnFromPicks)
             }
             .disabled(!model.draft.launcher.enabled)
 
