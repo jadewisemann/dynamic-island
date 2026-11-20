@@ -218,31 +218,35 @@ struct IslandView: View {
     }
 
     private var fade: AnyTransition {
+        let insertion = model.contentInAnimation
+        let removal = model.contentOutAnimation
         switch model.config.motion.contentTransition.lowercased() {
         case "none":
             return .identity
         case "slide":
             return .asymmetric(
                 insertion: AnyTransition.modifier(
-                    active: SlideFade(offset: 10, opacity: 0),
+                    active: SlideFade(offset: 8, opacity: 0),
                     identity: SlideFade(offset: 0, opacity: 1)
-                ).animation(model.swiftUIAnimation?.delay(0.06)),
-                removal: .modifier(
-                    active: SlideFade(offset: -6, opacity: 0),
+                ).animation(insertion),
+                removal: AnyTransition.modifier(
+                    active: SlideFade(offset: -3, opacity: 0),
                     identity: SlideFade(offset: 0, opacity: 1)
-                )
+                ).animation(removal)
             )
         default:
+            // A soft focus pull: a little blur and a barely visible scale.
+            // Larger values made the launcher look like it was popping in.
             let blur = model.config.motion.contentTransition.lowercased() != "fade"
             return .asymmetric(
                 insertion: AnyTransition.modifier(
-                    active: BlurFade(radius: blur ? 6 : 0, opacity: 0, scale: blur ? 0.92 : 1),
+                    active: BlurFade(radius: blur ? 5 : 0, opacity: 0, scale: blur ? 0.98 : 1),
                     identity: BlurFade(radius: 0, opacity: 1, scale: 1)
-                ).animation(model.swiftUIAnimation?.delay(0.06)),
-                removal: .modifier(
-                    active: BlurFade(radius: blur ? 4 : 0, opacity: 0, scale: blur ? 0.96 : 1),
+                ).animation(insertion),
+                removal: AnyTransition.modifier(
+                    active: BlurFade(radius: blur ? 3 : 0, opacity: 0, scale: 1),
                     identity: BlurFade(radius: 0, opacity: 1, scale: 1)
-                )
+                ).animation(removal)
             )
         }
     }
@@ -1027,8 +1031,8 @@ struct PopEffect: ViewModifier {
             view.scaleEffect(scale, anchor: .top)
         } keyframes: { _ in
             KeyframeTrack {
-                SpringKeyframe(CGFloat(1.045), duration: 0.16, spring: .snappy)
-                SpringKeyframe(CGFloat(1), duration: 0.4, spring: .bouncy)
+                SpringKeyframe(CGFloat(1.025), duration: 0.18, spring: .smooth)
+                SpringKeyframe(CGFloat(1), duration: 0.45, spring: .smooth)
             }
         }
     }

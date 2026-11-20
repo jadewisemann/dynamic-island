@@ -317,9 +317,10 @@ struct IslandConfig: Equatable {
         /// spring | bouncy | smooth | snappy | easeInOut | none
         var style = "spring"
         /// Spring settle time in seconds (spring only).
-        var response = 0.45
-        /// 0...1, lower is bouncier (spring only).
-        var dampingFraction = 0.76
+        var response = 0.5
+        /// 0...1, lower is bouncier (spring only). Near 1 the island settles
+        /// without overshooting, which reads calmer for large size changes.
+        var dampingFraction = 0.9
         /// Duration for easeInOut / bouncy / smooth / snappy.
         var durationMs = 380.0
         /// Multiplies the speed of every island animation.
@@ -667,6 +668,12 @@ extension IslandConfig {
         c.motion.style = n.string("style", c.motion.style)
         c.motion.response = n.number("response", c.motion.response)
         c.motion.dampingFraction = n.number("dampingFraction", c.motion.dampingFraction)
+        // Files written by older builds carry the old bouncy defaults verbatim;
+        // treat them as "never touched" and move them to the calmer spring.
+        if abs(c.motion.response - 0.45) < 0.0001 && abs(c.motion.dampingFraction - 0.76) < 0.0001 {
+            c.motion.response = IslandConfig.AnimationConfig().response
+            c.motion.dampingFraction = IslandConfig.AnimationConfig().dampingFraction
+        }
         c.motion.durationMs = n.number("durationMs", c.motion.durationMs)
         c.motion.speed = n.number("speed", c.motion.speed)
         // Older files had a blur on/off switch.

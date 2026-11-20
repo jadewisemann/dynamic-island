@@ -185,7 +185,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `launcher.searchClipboard` | `false` | 복사 기록도 기본 검색에 섞어서 보여 줍니다. |
 | `shelf.enabled` / `maxItems` | `true` / `30` | 클립보드 관리자가 복사 기록을 남길지와 기억할 개수입니다. |
 | `animation.style` | `"spring"` | `spring`, `bouncy`, `smooth`, `snappy`, `easeInOut`, `none` 중 하나입니다. |
-| `animation.response` / `dampingFraction` | `0.45` / `0.76` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. |
+| `animation.response` / `dampingFraction` | `0.5` / `0.9` | `spring`일 때 적용됩니다. 감쇠 값이 낮을수록 더 많이 튕깁니다. 이전 기본값(`0.45` / `0.76`)이 그대로 저장된 파일은 새 기본값으로 읽습니다. |
 | `animation.durationMs` | `380` | `spring`이 아닌 스타일의 재생 시간입니다. |
 | `animation.speed` | `1` | 모든 움직임의 속도 배율입니다. |
 | `animation.contentTransition` | `"blur"` | 내용이 나타나는 방식입니다. `blur`, `fade`, `slide`, `none` 중 하나입니다. (예전의 `blurTransitions: false`는 `fade`로 읽습니다.) |
