@@ -50,6 +50,7 @@ final class IslandModel: ObservableObject {
             case .hidden, .launcher: panelsOut = false
             case .expanded, .notification: break
             }
+            if !phase.isModifierPhase { hoverRevealed = false }
         }
     }
     /// Whether the side panels were out when the island grew for an event.
@@ -96,6 +97,15 @@ final class IslandModel: ObservableObject {
     /// The mouse is over the island; keeps it open after the modifier is
     /// released so its icons can be clicked.
     private(set) var pointerInside = false
+    /// The row was opened by the pointer at the top edge, not the modifier.
+    private(set) var hoverRevealed = false
+    /// Set while an Option-drag moves the island, so the click that ends
+    /// the drag does not also activate what is under the pointer.
+    var suppressTaps = false
+    /// The pointer's distance from where the island would be without a
+    /// drag: x to the right, y down from the top edge.
+    var dragOffset: CGPoint = .zero
+    private var hoverWork: DispatchWorkItem?
     /// Clicked an app icon in the workspace row.
     var onActivateApp: ((WorkspaceApp, WorkspaceItem) -> Void)?
     /// Clicked a workspace label or pill.
@@ -294,6 +304,25 @@ final class IslandModel: ObservableObject {
         }
     }
 
+    /// The pointer reached (true) or left (false) the strip at the top edge
+    /// above the island. Resting there opens the workspace row.
+    func pointerAtTopEdge(_ atEdge: Bool) {
+        guard atEdge, config.behavior.revealOnHover, !isPreview else {
+            hoverWork?.cancel()
+            hoverWork = nil
+            return
+        }
+        guard phase == .hidden, hoverWork == nil else { return }
+        hoverWork = after(ms: config.behavior.hoverDelayMs) { [weak self] in
+            guard let self else { return }
+            self.hoverWork = nil
+            guard self.phase == .hidden else { return }
+            self.clearMissed()
+            self.setPhase(.compact)
+            self.hoverRevealed = true
+        }
+    }
+
     /// Whether the island takes clicks right now.
     var acceptsClicks: Bool { (phase.isModifierPhase || phase == .notification || phase == .launcher) && !isPreview }
 
@@ -309,7 +338,7 @@ final class IslandModel: ObservableObject {
     }
 
     func open(_ n: IslandNotification) {
-        guard acceptsClicks else { return }
+        guard acceptsClicks, !suppressTaps else { return }
         onOpenNotification?(n)
         missedNotifications.removeAll { $0.id == n.id }
         if phase == .notification {
@@ -325,7 +354,7 @@ final class IslandModel: ObservableObject {
 
     /// A button on the card: runs it, then moves on like a click.
     func perform(_ action: NotificationAction, on n: IslandNotification) {
-        guard acceptsClicks else { return }
+        guard acceptsClicks, !suppressTaps else { return }
         onNotificationAction?(n, action)
         missedNotifications.removeAll { $0.id == n.id }
         if phase == .notification && notification?.id == n.id {
@@ -343,7 +372,7 @@ final class IslandModel: ObservableObject {
     }
 
     func openAgent(_ session: AgentSession) {
-        guard acceptsClicks else { return }
+        guard acceptsClicks, !suppressTaps else { return }
         onOpenAgent?(session)
         closeAfterClick()
     }
@@ -370,13 +399,13 @@ final class IslandModel: ObservableObject {
     // MARK: - Clicks
 
     func activate(_ app: WorkspaceApp, in ws: WorkspaceItem) {
-        guard acceptsClicks else { return }
+        guard acceptsClicks, !suppressTaps else { return }
         onActivateApp?(app, ws)
         closeAfterClick()
     }
 
     func focus(_ ws: WorkspaceItem) {
-        guard acceptsClicks else { return }
+        guard acceptsClicks, !suppressTaps else { return }
         onFocusWorkspace?(ws)
         closeAfterClick()
     }

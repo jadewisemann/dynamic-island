@@ -343,6 +343,18 @@ private struct GeneralSettings: View {
                           range: 0...600, step: 10, unit: "ms")
                 SliderRow(title: "키를 뗀 뒤 사라지기까지", value: $model.draft.trigger.hideDelayMs,
                           range: 0...1000, step: 10, unit: "ms")
+                Toggle("마우스를 아일랜드 위쪽 화면 끝에 대면 열기", isOn: $model.draft.behavior.revealOnHover)
+                if model.draft.behavior.revealOnHover {
+                    SliderRow(title: "화면 끝에 머물러야 하는 시간", value: $model.draft.behavior.hoverDelayMs,
+                              range: 0...800, step: 10, unit: "ms")
+                }
+                Picker("자동으로 숨긴 메뉴 막대 막기", selection: $model.draft.behavior.blockMenuBar) {
+                    Text("노치 없는 화면의 아일랜드 주변").tag("virtualNotch")
+                    Text("모든 화면의 아일랜드 주변").tag("island")
+                    Text("아일랜드 화면의 위쪽 끝 전체").tag("screen")
+                    Text("막지 않음").tag("off")
+                }
+                Toggle("열린 아일랜드를 Option을 누른 채 끌어서 옮기기", isOn: $model.draft.behavior.dragToMove)
             }
 
             Section("이동 알림") {
