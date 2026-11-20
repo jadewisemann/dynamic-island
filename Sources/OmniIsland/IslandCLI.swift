@@ -1,22 +1,40 @@
 import Darwin
 import Foundation
+import MachO
 
 /// `omni-island <command>`: the app's executable doubles as a small client
 /// that talks to the running app over its Unix socket.
 ///
+///     omni-island                    (like `code`: opens the app, detached)
+///     omni-island settings | launcher | quit
 ///     omni-island notify --title "빌드 완료" --body "3분 12초" --icon hammer
 ///     omni-island dismiss --id build
 ///     omni-island hook claude        (Claude Code hooks; JSON on stdin)
 ///     omni-island hook codex <json>  (Codex `notify` program)
 enum IslandCLI {
-    static let commands: Set<String> = ["notify", "dismiss", "hook", "help", "--help", "-h"]
+    static let commands: Set<String> = [
+        "open", "settings", "launcher", "quit", "run",
+        "notify", "dismiss", "hook", "help", "--help", "-h",
+    ]
+
+    /// Set on the app that `omni-island` starts through `open`, so that
+    /// process runs the app instead of launching it once more.
+    private static let launchedKey = "OMNI_ISLAND_LAUNCHED"
 
     /// Runs a command and returns its exit code, or nil when the arguments
     /// are not a command (the app starts normally).
     static func run(_ arguments: [String]) -> Int32? {
-        guard arguments.count >= 2, commands.contains(arguments[1]) else { return nil }
+        if arguments.count < 2 {
+            return startedFromShell ? open() : nil
+        }
+        guard commands.contains(arguments[1]) else { return nil }
         let args = Array(arguments.dropFirst(2))
         switch arguments[1] {
+        case "open": return open()
+        case "settings": return remote("settings")
+        case "launcher": return remote("launcher")
+        case "quit": return quit()
+        case "run": return nil
         case "notify": return notify(args)
         case "dismiss": return dismiss(args)
         case "hook": return hook(args)
@@ -27,8 +45,13 @@ enum IslandCLI {
     }
 
     static let usage = """
-    사용법: omni-island <명령> [옵션]
+    사용법: omni-island [명령] [옵션]
 
+      (없음)   앱을 엽니다. 이미 실행 중이면 설정 창을 띄웁니다. (= open)
+      settings 설정 창을 엽니다. 앱이 꺼져 있으면 먼저 실행합니다.
+      launcher 런처를 열거나 닫습니다. 앱이 꺼져 있으면 먼저 실행합니다.
+      quit     실행 중인 앱을 종료합니다.
+      run      터미널에 붙은 채로 앱을 실행합니다. 로그가 stderr로 나옵니다.
       notify   아일랜드에 카드를 띄웁니다.
                --title 제목 (필수)  --body 본문  --app 보낸 곳 이름
                --icon SF Symbol 이름  --color #RRGGBB  --bundle-id 앱 번들 ID
@@ -40,6 +63,76 @@ enum IslandCLI {
     """
 
     // MARK: - Commands
+
+    /// True when a shell ran the bundled executable (the Homebrew
+    /// `omni-island` link). LaunchServices and login items start the app
+    /// from launchd, whose pid is 1; `swift run` has no .app bundle.
+    private static var startedFromShell: Bool {
+        guard ProcessInfo.processInfo.environment[launchedKey] == nil, appBundleURL != nil else { return false }
+        return getppid() != 1
+    }
+
+    /// The OmniIsland.app this executable belongs to, through the symlink.
+    static var appBundleURL: URL? {
+        var size: UInt32 = 0
+        _ = _NSGetExecutablePath(nil, &size)
+        var buffer = [CChar](repeating: 0, count: Int(size) + 1)
+        guard _NSGetExecutablePath(&buffer, &size) == 0, let real = realpath(buffer, nil) else { return nil }
+        defer { free(real) }
+        let app = URL(fileURLWithPath: String(cString: real))
+            .deletingLastPathComponent() // MacOS
+            .deletingLastPathComponent() // Contents
+            .deletingLastPathComponent()
+        return app.pathExtension == "app" ? app : nil
+    }
+
+    /// Like `code`: starts the app detached from this terminal and returns.
+    /// When the app already runs, `open` sends it a reopen event, which
+    /// shows the settings window.
+    private static func open() -> Int32 {
+        guard let app = appBundleURL else {
+            fputs("OmniIsland.app을 찾지 못했습니다.\n", stderr)
+            return 1
+        }
+        return launch(app) ? 0 : 1
+    }
+
+    private static func launch(_ app: URL) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["--env", "\(launchedKey)=1", app.path]
+        do { try process.run() } catch {
+            fputs("OmniIsland를 열지 못했습니다: \(error.localizedDescription)\n", stderr)
+            return false
+        }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+
+    /// Sends a command to the app, starting it first when it is not running.
+    private static func remote(_ type: String) -> Int32 {
+        send(["type": type], wait: false, quiet: true)
+        if lastSendSucceeded { return 0 }
+        guard let app = appBundleURL else {
+            fputs("OmniIsland가 실행 중이 아닙니다.\n", stderr)
+            return 1
+        }
+        guard launch(app) else { return 1 }
+        // Wait up to 10 s for the new app to open its socket.
+        for _ in 0..<50 {
+            usleep(200_000)
+            send(["type": type], wait: false, quiet: true)
+            if lastSendSucceeded { return 0 }
+        }
+        fputs("OmniIsland가 응답하지 않습니다.\n", stderr)
+        return 1
+    }
+
+    private static func quit() -> Int32 {
+        send(["type": "quit"], wait: false, quiet: true)
+        if !lastSendSucceeded { print("OmniIsland가 실행 중이 아닙니다.") }
+        return 0
+    }
 
     private static func notify(_ args: [String]) -> Int32 {
         let o = options(args)
@@ -118,7 +211,8 @@ enum IslandCLI {
 
     /// Sends one request; with `wait`, returns the app's answer.
     @discardableResult
-    static func send(_ request: [String: Any], wait: Bool, timeout: Int = 2) -> [String: Any]? {
+    static func send(_ request: [String: Any], wait: Bool, timeout: Int = 2,
+                     quiet: Bool = false) -> [String: Any]? {
         lastSendSucceeded = false
         let path = IslandSocketPath.url.path
         guard var addr = IslandSocketPath.address(path),
@@ -134,7 +228,7 @@ enum IslandCLI {
             }
         }
         guard connected == 0 else {
-            if !wait && request["type"] as? String != "agent" {
+            if !quiet && !wait && request["type"] as? String != "agent" {
                 fputs("OmniIsland가 실행 중이 아닙니다.\n", stderr)
             }
             return nil

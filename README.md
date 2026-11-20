@@ -283,9 +283,21 @@ macOS에는 다른 앱의 알림을 읽는 공식 API가 없어서, 두 가지 �
 | `agents.notifyDone` / `notifyWaiting` | `true` / `true` | 완료와 입력 대기 카드를 띄웁니다. |
 | `agents.cardDurationMs` / `keepDoneMin` | `5000` / `30` | 카드 표시 시간과, 끝난 세션을 위젯에 남겨 두는 시간(분)입니다. |
 
+### 터미널에서 앱 열기
+
+Homebrew로 설치하면 `omni-island` 명령이 함께 설치됩니다. VS Code의 `code`처럼, 인자 없이 입력하면 앱을 터미널과 분리해서 실행하고 바로 프롬프트로 돌아옵니다. 앱이 이미 실행 중이면 설정 창을 앞으로 가져옵니다.
+
+```bash
+omni-island            # 앱 열기 (실행 중이면 설정 창)
+omni-island settings   # 설정 창 열기 (꺼져 있으면 먼저 실행)
+omni-island launcher   # 런처 열기/닫기 (단축키와 같은 동작)
+omni-island quit       # 앱 종료
+omni-island run        # 터미널에 붙은 채로 실행 (로그가 stderr로 나옵니다)
+```
+
 ### 스크립트에서 카드 띄우기
 
-Homebrew로 설치하면 `omni-island` 명령이 함께 설치됩니다. 앱이 `~/Library/Application Support/OmniIsland/island.sock`에서 요청을 받으므로, 빌드 스크립트나 텔레그램·디스코드 봇 중계, CI 결과 확인처럼 어디서든 카드를 띄울 수 있습니다.
+`omni-island` 명령으로 카드를 띄울 수도 있습니다. 앱이 `~/Library/Application Support/OmniIsland/island.sock`에서 요청을 받으므로, 빌드 스크립트나 텔레그램·디스코드 봇 중계, CI 결과 확인처럼 어디서든 카드를 띄울 수 있습니다.
 
 ```bash
 omni-island notify --title "빌드 완료" --body "3분 12초" --icon hammer --color "#30D158"
@@ -300,7 +312,7 @@ omni-island help
 
 - **메뉴에 "OmniWM IPC에 연결할 수 없습니다"가 보입니다**: OmniWM 메뉴에서 **Enable IPC**를 켰는지 확인합니다. 켜면 앱이 알아서 다시 연결합니다.
 - **"omniwmctl을 찾지 못했습니다"가 보입니다**: GUI 앱은 셸의 PATH를 물려받지 않습니다. 설정 파일의 `omniwmctlPath`에 `which omniwmctl` 결과를 적어 주세요.
-- **Option 키를 눌러도 반응이 없습니다**: 손쉬운 사용 권한을 확인하고, 설정 파일의 `trigger.modifier`가 올바른지 확인합니다. 터미널에서 `build/OmniIsland.app/Contents/MacOS/OmniIsland`를 직접 실행하면 로그가 stderr로 출력됩니다.
+- **Option 키를 눌러도 반응이 없습니다**: 손쉬운 사용 권한을 확인하고, 설정 파일의 `trigger.modifier`가 올바른지 확인합니다. 터미널에서 `omni-island run`(직접 빌드했다면 `build/OmniIsland.app/Contents/MacOS/OmniIsland run`)을 실행하면 로그가 stderr로 출력됩니다.
 - **OmniWM 버전이 바뀐 뒤 동작하지 않습니다**: OmniWM IPC는 클라이언트와 서버의 프로토콜 버전이 정확히 같아야 합니다. 이 앱은 `omniwmctl`을 거쳐 통신하므로, OmniWM과 같은 버전의 `omniwmctl`을 쓰고 있는지 확인합니다.
 
 ## 프로토타입의 한계
