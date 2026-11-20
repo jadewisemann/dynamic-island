@@ -186,7 +186,8 @@ final class AppsPlugin: LauncherPlugin {
                 }
             }
             guard let best else { continue }
-            let boost = min(apps.launchCount(app), 20) * 8
+            // At the top level the launcher adds what it learned from picks.
+            let boost = inMode ? min(apps.launchCount(app), 20) * 8 : 0
             let subtitle = app.fileName != app.displayName ? app.fileName : nil
             items.append(row(app.path, .app(app), title: app.displayName, subtitle: subtitle,
                              hits: bestIsDisplay ? best.hits : [], score: best.score + boost))

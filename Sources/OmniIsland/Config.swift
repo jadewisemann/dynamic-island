@@ -278,6 +278,8 @@ struct IslandConfig: Equatable {
         /// Clipboard history in the top-level search (it always has its own
         /// mode, "c ").
         var searchClipboard = false
+        /// Learn which rows are picked after which query and lift them.
+        var learnFromPicks = true
         /// Width of the island while the launcher is open.
         var width = 560.0
         /// Trigger prefix of each built-in app: typing it and a space enters
@@ -643,6 +645,7 @@ extension IslandConfig {
         c.launcher.askGrok = la.bool("askGrok", c.launcher.askGrok)
         c.launcher.searchX = la.bool("searchX", c.launcher.searchX)
         c.launcher.searchClipboard = la.bool("searchClipboard", c.launcher.searchClipboard)
+        c.launcher.learnFromPicks = la.bool("learnFromPicks", c.launcher.learnFromPicks)
         for (key, value) in la.sub("prefixes").dict {
             if let text = value as? String { c.launcher.prefixes[key] = text.trimmingCharacters(in: .whitespaces) }
         }
@@ -1012,6 +1015,8 @@ extension IslandConfig {
             "searchX": \(b(la.searchX)),
             // 복사 기록도 기본 검색에 섞어서 보여 줍니다. 꺼 두어도 "c "로 클립보드 관리자에 들어갈 수 있습니다.
             "searchClipboard": \(b(la.searchClipboard)),
+            // 고른 결과를 기억해서, 자주 고른 항목과 같은 검색어로 골랐던 항목을 위로 올립니다.
+            "learnFromPicks": \(b(la.learnFromPicks)),
             "width": \(n(la.width)),
             // 내장 앱의 트리거 접두어입니다. 접두어 다음에 스페이스를 누르면 그 앱만 보입니다.
             // 한글 자판으로 친 글자(ㅊ, ㅈ, ㄴ, ㄹ)도 됩니다. ""로 두면 접두어를 쓰지 않습니다.

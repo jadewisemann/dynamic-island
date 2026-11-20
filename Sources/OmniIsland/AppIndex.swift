@@ -77,6 +77,13 @@ final class AppIndex {
         saveHistory()
     }
 
+    /// The launch counts as launcher picks, for the first run that learns them.
+    func pickSeed() -> [String: LauncherPicks.Entry] {
+        Dictionary(uniqueKeysWithValues: history.map { path, e in
+            ("apps:" + path, LauncherPicks.Entry(weight: Double(min(e.count, 20)), last: e.last))
+        })
+    }
+
     /// Most recently opened first; falls back to running apps when the
     /// launcher has not been used yet.
     func recentApps(limit: Int) -> [AppEntry] {
