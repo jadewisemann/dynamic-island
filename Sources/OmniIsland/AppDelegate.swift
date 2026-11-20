@@ -5,7 +5,8 @@ import SwiftUI
 struct OmniIslandMain {
     @MainActor
     static func main() {
-        // `omni-island notify …` and the agent hooks run the same executable.
+        // `omni-island`, `omni-island notify …` and the agent hooks run the
+        // same executable.
         if let code = IslandCLI.run(CommandLine.arguments) { exit(code) }
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -255,6 +256,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "dismiss":
             if let id = request["id"] as? String { model.dismiss(externalId: "ext:" + id) }
             reply(["ok": true])
+        case "settings":
+            showSettings()
+            reply(["ok": true])
+        case "launcher":
+            model.toggleLauncher()
+            reply(["ok": true])
+        case "quit":
+            reply(["ok": true])
+            DispatchQueue.main.async { NSApp.terminate(nil) }
         default:
             reply(["ok": false, "error": "unknown type"])
         }
