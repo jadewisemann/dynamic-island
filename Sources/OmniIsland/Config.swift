@@ -64,6 +64,18 @@ struct IslandConfig: Equatable {
         var coalesceMs = 140.0
         /// How often Dock notification badges are re-read.
         var badgeIntervalMs = 3000.0
+        /// Open the workspace row when the pointer reaches the top edge
+        /// above the island, without the modifier.
+        var revealOnHover = true
+        /// How long the pointer rests at the edge before the row opens.
+        var hoverDelayMs = 150.0
+        /// Keeps an auto-hidden macOS menu bar from sliding down at the top
+        /// edge: off | virtualNotch (around the island on screens without a
+        /// hardware notch) | island (around the island on any screen) |
+        /// screen (the whole top edge of the island's screen).
+        var blockMenuBar = "virtualNotch"
+        /// Option-drag the open island to move it.
+        var dragToMove = true
     }
 
     /// Everything a theme preset changes. Stored flat in "appearance" (the
@@ -539,6 +551,10 @@ extension IslandConfig {
         c.behavior.showMenuBarIcon = b.bool("showMenuBarIcon", c.behavior.showMenuBarIcon)
         c.behavior.coalesceMs = b.number("coalesceMs", c.behavior.coalesceMs)
         c.behavior.badgeIntervalMs = b.number("badgeIntervalMs", c.behavior.badgeIntervalMs)
+        c.behavior.revealOnHover = b.bool("revealOnHover", c.behavior.revealOnHover)
+        c.behavior.hoverDelayMs = b.number("hoverDelayMs", c.behavior.hoverDelayMs)
+        c.behavior.blockMenuBar = b.string("blockMenuBar", c.behavior.blockMenuBar)
+        c.behavior.dragToMove = b.bool("dragToMove", c.behavior.dragToMove)
 
         let a = r.sub("appearance")
         c.appearance.colors = ThemeColors(dict: a.dict, base: c.appearance.colors)
@@ -853,6 +869,14 @@ extension IslandConfig {
             "coalesceMs": \(n(be.coalesceMs)),
             // Dock 알림 배지를 다시 읽는 간격입니다.
             "badgeIntervalMs": \(n(be.badgeIntervalMs)),
+            // 마우스를 아일랜드 위쪽 화면 끝에 대면 워크스페이스 줄을 엽니다.
+            "revealOnHover": \(b(be.revealOnHover)),
+            "hoverDelayMs": \(n(be.hoverDelayMs)),
+            // 자동으로 숨긴 메뉴 막대가 내려오지 않게 막는 범위입니다.
+            // off | virtualNotch (노치 없는 화면의 아일랜드 주변) | island (모든 화면의 아일랜드 주변) | screen (아일랜드 화면의 위쪽 끝 전체)
+            "blockMenuBar": \(q(be.blockMenuBar)),
+            // 아일랜드가 열려 있을 때 Option을 누른 채 끌어서 옮깁니다.
+            "dragToMove": \(b(be.dragToMove)),
           },
 
           "appearance": {

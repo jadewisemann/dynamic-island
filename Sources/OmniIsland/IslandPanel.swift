@@ -56,6 +56,16 @@ final class IslandWindowController {
     private var phaseObserver: AnyCancellable?
     private var mouseTimer: Timer?
     private var resignObserver: NSObjectProtocol?
+    private var moveMonitors: [Any] = []
+    private var dragMonitor: Any?
+    private var drag: DragState?
+    private var lastEdgeState = false
+
+    private struct DragState {
+        let start: NSPoint
+        let startOffset: CGPoint
+        var moved = false
+    }
 
     init(model: IslandModel) {
         self.model = model
@@ -88,6 +98,7 @@ final class IslandWindowController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.reposition() }
         }
+        installPointerMonitors()
     }
 
     func show() {
@@ -109,6 +120,10 @@ final class IslandWindowController {
 
         let geometry = Self.notchGeometry(for: target, config: model.config.appearance)
         if geometry != model.geometry { model.geometry = geometry }
+        // A drag in progress already holds the offset; otherwise each
+        // screen keeps the place it was last dragged to.
+        let moved = drag == nil ? Self.savedOffset(for: target) : model.dragOffset
+        model.dragOffset = moved
 
         let maxSize = model.maximumSize
         let margin = Self.panelMargin
@@ -127,8 +142,8 @@ final class IslandWindowController {
             x = Self.notchCenterX(for: target) + offset - width / 2
         }
         let frame = NSRect(
-            x: x,
-            y: target.frame.maxY - height,
+            x: x + moved.x,
+            y: target.frame.maxY - height - moved.y,
             width: width,
             height: height
         )
@@ -194,7 +209,14 @@ final class IslandWindowController {
     }
 
     private func trackMouse() {
-        let inside = islandFrame().insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+        var zone = islandFrame()
+        if model.hoverRevealed, let top = screen?.frame.maxY, top > zone.maxY {
+            // Opened from the top edge: the gap above a floating or moved
+            // island counts as inside, so the row stays while the pointer
+            // travels down to it.
+            zone = zone.union(NSRect(x: zone.minX, y: zone.maxY, width: zone.width, height: top - zone.maxY))
+        }
+        let inside = zone.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
         if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
         model.setPointerInside(inside)
     }
@@ -212,6 +234,177 @@ final class IslandWindowController {
         }
         let top = frame.maxY - model.currentTopOffset
         return NSRect(x: midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    }
+
+    // MARK: - Top edge and dragging
+
+    /// Height of the strip at the top edge that opens the row.
+    static let edgeHeight: CGFloat = 3
+    /// Extra width on each side of the hidden island that still counts.
+    static let edgeSlack: CGFloat = 24
+
+    private func installPointerMonitors() {
+        let moved: NSEvent.EventTypeMask = [.mouseMoved]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: moved, handler: { [weak self] _ in
+            MainActor.assumeIsolated { () -> Void in self?.pointerMoved() }
+        }) {
+            moveMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: moved, handler: { [weak self] event in
+            MainActor.assumeIsolated { () -> Void in self?.pointerMoved() }
+            return event
+        }) {
+            moveMonitors.append(local)
+        }
+        // Clicks on the panel only reach this app, so a local monitor sees
+        // every press on the island before SwiftUI does.
+        dragMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            MainActor.assumeIsolated { () -> NSEvent? in
+                guard let self else { return event }
+                return self.handleDrag(event)
+            }
+        }
+    }
+
+    /// The hidden island's rectangle (where the notch shape sits).
+    private func hiddenFrame(on target: NSScreen) -> NSRect {
+        let frame = panel.frame
+        let size = model.hiddenSize
+        let margin = Self.panelMargin
+        let midX: CGFloat
+        switch model.horizontalPosition {
+        case "left": midX = frame.minX + margin + size.width / 2
+        case "right": midX = frame.maxX - margin - size.width / 2
+        default: midX = frame.midX
+        }
+        return NSRect(x: midX - size.width / 2, y: frame.maxY - size.height,
+                      width: size.width, height: size.height)
+    }
+
+    private func pointerMoved() {
+        guard let target = screen else { return }
+        let location = NSEvent.mouseLocation
+        let top = target.frame.maxY
+        let hidden = hiddenFrame(on: target)
+        let span = hidden.insetBy(dx: -Self.edgeSlack, dy: 0)
+        let onScreen = location.x >= target.frame.minX && location.x < target.frame.maxX
+        let nearIsland = location.x >= span.minX && location.x <= span.maxX
+
+        if onScreen, location.y >= top - 0.5, blocksMenuBar(on: target, nearIsland: nearIsland) {
+            nudgeBelowTopEdge(location, screen: target)
+        }
+
+        let atEdge = onScreen && nearIsland && location.y >= top - Self.edgeHeight
+        let overHidden = hidden.insetBy(dx: -4, dy: -4).contains(location)
+        let state = atEdge || (model.phase == .hidden && overHidden)
+        if state != lastEdgeState {
+            lastEdgeState = state
+            model.pointerAtTopEdge(state)
+        }
+    }
+
+    private func blocksMenuBar(on target: NSScreen, nearIsland: Bool) -> Bool {
+        switch model.config.behavior.blockMenuBar.lowercased() {
+        case "screen": return true
+        case "island": return nearIsland
+        case "virtualnotch", "virtual": return nearIsland && target.safeAreaInsets.top == 0
+        default: return false
+        }
+    }
+
+    /// macOS slides an auto-hidden menu bar down when the pointer rests on
+    /// the screen's top row. There is no public API to stop that for other
+    /// apps, so the pointer is moved one point down whenever it reaches
+    /// that row on the guarded part of the edge.
+    private func nudgeBelowTopEdge(_ location: NSPoint, screen target: NSScreen) {
+        guard let primary = NSScreen.screens.first else { return }
+        let y = primary.frame.maxY - (target.frame.maxY - 1)
+        if let source = CGEventSource(stateID: .combinedSessionState) {
+            // Otherwise the warp freezes the pointer for a quarter second.
+            source.localEventsSuppressionInterval = 0
+        }
+        CGWarpMouseCursorPosition(CGPoint(x: location.x, y: y))
+        CGAssociateMouseAndMouseCursorPosition(1)
+    }
+
+    /// Option-press on the open island starts a move; a press that does not
+    /// travel stays a normal click.
+    private func handleDrag(_ event: NSEvent) -> NSEvent? {
+        switch event.type {
+        case .leftMouseDown:
+            drag = nil
+            guard event.window === panel,
+                  model.config.behavior.dragToMove,
+                  model.phase.isModifierPhase,
+                  event.modifierFlags.contains(.option) else { return event }
+            drag = DragState(start: NSEvent.mouseLocation, startOffset: model.dragOffset)
+            return event
+        case .leftMouseDragged:
+            guard var state = drag, let target = screen else { return event }
+            let now = NSEvent.mouseLocation
+            let dx = now.x - state.start.x
+            let dy = state.start.y - now.y
+            if !state.moved {
+                guard hypot(dx, dy) > 4 else { return event }
+                state.moved = true
+                model.suppressTaps = true
+            }
+            drag = state
+            model.dragOffset = clamped(CGPoint(x: state.startOffset.x + dx, y: state.startOffset.y + dy),
+                                       on: target)
+            reposition()
+            return nil
+        case .leftMouseUp:
+            guard let state = drag else { return event }
+            drag = nil
+            if state.moved, let target = screen {
+                Self.saveOffset(model.dragOffset, for: target)
+                // The tap that SwiftUI sees for this release is ignored.
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated { self?.model.suppressTaps = false }
+                }
+            }
+            return event
+        default:
+            return event
+        }
+    }
+
+    /// Keeps the island's notch-sized core on the screen.
+    private func clamped(_ offset: CGPoint, on target: NSScreen) -> CGPoint {
+        let hidden = model.hiddenSize
+        let base = hiddenFrame(on: target).midX - model.dragOffset.x
+        let minX = target.frame.minX + hidden.width / 2 - base
+        let maxX = target.frame.maxX - hidden.width / 2 - base
+        let maxY = max(target.frame.height - model.currentSize.height - 20, 0)
+        return CGPoint(x: min(max(offset.x, minX), maxX), y: min(max(offset.y, 0), maxY))
+    }
+
+    /// Puts the island back where it belongs (menu bar item).
+    func resetPosition() {
+        if let target = screen { Self.saveOffset(.zero, for: target) }
+        model.dragOffset = .zero
+        reposition()
+    }
+
+    private static func offsetKey(for screen: NSScreen) -> String {
+        "islandOffset." + screen.localizedName
+    }
+
+    static func savedOffset(for screen: NSScreen) -> CGPoint {
+        guard let values = UserDefaults.standard.array(forKey: offsetKey(for: screen)) as? [Double],
+              values.count == 2 else { return .zero }
+        return CGPoint(x: values[0], y: values[1])
+    }
+
+    static func saveOffset(_ offset: CGPoint, for screen: NSScreen) {
+        if offset == .zero {
+            UserDefaults.standard.removeObject(forKey: offsetKey(for: screen))
+        } else {
+            UserDefaults.standard.set([Double(offset.x), Double(offset.y)], forKey: offsetKey(for: screen))
+        }
     }
 
     private func chooseScreen() -> NSScreen? {

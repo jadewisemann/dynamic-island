@@ -594,6 +594,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(makeItem("설정 파일 열기", #selector(openConfig), ""))
         menu.addItem(makeItem("설정 다시 불러오기", #selector(reloadConfig), "r"))
         menu.addItem(makeItem("OmniWM 다시 연결", #selector(reconnect), ""))
+        menu.addItem(makeItem("아일랜드 위치 되돌리기", #selector(resetIslandPosition), ""))
         menu.addItem(.separator())
         menu.addItem(makeItem("OmniIsland 종료", #selector(quit), "q"))
         menu.delegate = self
@@ -726,6 +727,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func reloadConfig() {
         configStore.reload()
         configChanged(configStore.config)
+    }
+
+    @objc private func resetIslandPosition() {
+        windowController?.resetPosition()
     }
 
     @objc private func reconnect() {
