@@ -18,6 +18,17 @@ enum IslandPhase: Equatable {
 
     /// Phases that the modifier opened and that close when it is released.
     var isModifierPhase: Bool { self == .compact || self == .dashboard }
+
+    /// How much of the screen the phase takes; moving to a lower rank is a
+    /// dismissal and gets the quicker, non-overshooting curve.
+    var presence: Int {
+        switch self {
+        case .hidden: return 0
+        case .compact: return 1
+        case .expanded, .notification: return 2
+        case .dashboard, .launcher: return 3
+        }
+    }
 }
 
 /// Size of the hardware notch (or a stand-in on screens without one).
@@ -1032,7 +1043,44 @@ final class IslandModel: ObservableObject {
         default:
             base = .spring(response: max(n.response, 0.05), dampingFraction: min(max(n.dampingFraction, 0.05), 1))
         }
-        let speed = min(max(n.speed, 0.1), 5)
+        return scaled(base)
+    }
+
+    /// Curve for the island shrinking back (closing the launcher, releasing
+    /// the modifier). Closing should feel lighter than opening: a bit
+    /// quicker and with no overshoot, so the island never bounces past the
+    /// notch. Still a spring, so it picks up the velocity of an opening that
+    /// is interrupted halfway, and fast toggling stays continuous.
+    var dismissAnimation: Animation? {
+        let n = config.motion
+        switch n.style.lowercased() {
+        case "none": return nil
+        case "easeinout", "ease", "bouncy", "smooth", "snappy":
+            let d = max(n.durationMs, 1) / 1000
+            return scaled(.spring(duration: d * 0.85, bounce: 0))
+        default:
+            let response = max(n.response, 0.05) * 0.85
+            return scaled(.spring(response: response, dampingFraction: 1))
+        }
+    }
+
+    /// Content (search field, rows, cards) fading in once the island has
+    /// started to grow. An ease-out curve rather than the island's spring,
+    /// so blur and scale settle without wobbling on top of the resize.
+    var contentInAnimation: Animation? {
+        guard config.motion.style.lowercased() != "none" else { return nil }
+        return scaled(.timingCurve(0.22, 1, 0.36, 1, duration: 0.42).delay(0.07))
+    }
+
+    /// Content leaving: gone quickly, before the island shrinks over it, so
+    /// nothing is squeezed or clipped by the closing outline.
+    var contentOutAnimation: Animation? {
+        guard config.motion.style.lowercased() != "none" else { return nil }
+        return scaled(.easeOut(duration: 0.14))
+    }
+
+    private func scaled(_ base: Animation) -> Animation {
+        let speed = min(max(config.motion.speed, 0.1), 5)
         return speed == 1 ? base : base.speed(speed)
     }
 
@@ -1060,7 +1108,8 @@ final class IslandModel: ObservableObject {
 
     private func setPhase(_ next: IslandPhase) {
         guard next != phase else { return }
-        animate { self.phase = next }
+        let animation = next.presence < phase.presence ? dismissAnimation : swiftUIAnimation
+        withAnimation(animation) { self.phase = next }
     }
 
     private func animate(_ body: () -> Void) {
