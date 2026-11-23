@@ -76,6 +76,8 @@ final class IslandModel: ObservableObject {
     @Published private(set) var missedNotifications: [IslandNotification] = []
     /// Most recent first, for the dashboard.
     @Published private(set) var recentNotifications: [IslandNotification] = []
+    /// Claude Code usage (tokens from local logs, plan limits if read).
+    @Published private(set) var aiUsage: AIUsage?
     /// Coding agent sessions reported through hooks, most recent first.
     @Published private(set) var agentSessions: [AgentSession] = []
     /// Today's and tomorrow's calendar events, sorted by start.
@@ -117,6 +119,8 @@ final class IslandModel: ObservableObject {
     var onNotificationAction: ((IslandNotification, NotificationAction) -> Void)?
     /// Clicked an agent session in a wing or tile.
     var onOpenAgent: ((AgentSession) -> Void)?
+    /// "모두 닫기" on a card (closes the system banners too).
+    var onCloseAllNotifications: (() -> Void)?
     /// The notification history changed (for the menu bar list).
     var onRecentChange: (() -> Void)?
     private var showWork: DispatchWorkItem?
@@ -384,11 +388,44 @@ final class IslandModel: ObservableObject {
         }
     }
 
+    /// The × on a card: closes it without counting it as missed, then
+    /// shows the next queued card.
+    func closeNotification() {
+        guard acceptsClicks, !suppressTaps, phase == .notification else { return }
+        notificationWork?.cancel()
+        if let n = notification { missedNotifications.removeAll { $0.id == n.id } }
+        if !showNextNotification() {
+            pointerInside = false
+            setPhase(.hidden)
+        }
+    }
+
+    /// "모두 닫기": drops the card on screen, every queued card and the
+    /// missed indicator.
+    func closeAllNotifications() {
+        guard acceptsClicks, !suppressTaps else { return }
+        notificationWork?.cancel()
+        animate {
+            self.notificationQueue = []
+            self.missedNotifications = []
+        }
+        onCloseAllNotifications?()
+        if phase == .notification {
+            pointerInside = false
+            setPhase(.hidden)
+        }
+    }
+
     // MARK: - Agents and external cards
 
     func setAgentSessions(_ sessions: [AgentSession]) {
         guard sessions != agentSessions else { return }
         animate { self.agentSessions = sessions }
+    }
+
+    func setAIUsage(_ usage: AIUsage?) {
+        guard usage != aiUsage else { return }
+        animate { self.aiUsage = usage }
     }
 
     func openAgent(_ session: AgentSession) {
@@ -835,6 +872,7 @@ final class IslandModel: ObservableObject {
         case "windows": return 40
         case "nextevent": return nextEvent == nil ? 84 : 150
         case "notifications": return 40
+        case "usage": return 64
         case "workspace":
             let text = activeWorkspaceText ?? ""
             return max(28, ceil((text as NSString).size(withAttributes: [.font: pillFont]).width) + 20)
@@ -1010,6 +1048,7 @@ final class IslandModel: ObservableObject {
     static let notificationCardHeight: CGFloat = 78
     static let dashboardRowHeight: CGFloat = 22
     static let dashboardHistoryRows = 3
+    static let dashboardUsageHeight: CGFloat = 30
 
     /// Height under the workspace row in the dashboard: clock and events on
     /// top, then up to three rows of notification history.
@@ -1017,6 +1056,7 @@ final class IslandModel: ObservableObject {
         let items = config.dashboard.items.map { $0.lowercased() }
         var height: CGFloat = 19
         if items.contains("clock") || items.contains("events") { height += 64 }
+        if items.contains("usage") { height += Self.dashboardUsageHeight }
         if items.contains("notifications") {
             let rows = max(1, min(recentNotifications.count, Self.dashboardHistoryRows))
             height += CGFloat(rows) * Self.dashboardRowHeight + 8

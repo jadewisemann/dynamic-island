@@ -4,8 +4,8 @@
 #   brew tap jadewisemann/dynamic-island https://github.com/jadewisemann/dynamic-island
 #   brew install --cask omni-island
 cask "omni-island" do
-  version "0.11.0"
-  sha256 "8a2b0da05718691f926ee27808babecc4833bfb0a3c2eeed3398904de3a4b968"
+  version "0.12.0"
+  sha256 "32001447e115b324e43d0b6a5b7b887947e064240d41cd7c662ae0bd52ea308e"
 
   url "https://github.com/jadewisemann/dynamic-island/releases/download/v#{version}/OmniIsland.zip"
   name "OmniIsland"

@@ -58,6 +58,7 @@ struct WidgetTile: View {
             }
         case "notifications": NotificationsTile(model: model, wide: wide, unit: unit)
         case "agents": AgentsTile(model: model, wide: wide, unit: unit)
+        case "usage": UsageTile(model: model, wide: wide, unit: unit)
         default: EmptyView()
         }
     }
