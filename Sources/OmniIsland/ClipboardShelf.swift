@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CryptoKit
 import UniformTypeIdentifiers
 
@@ -255,34 +256,105 @@ final class ClipboardShelf {
 
     /// Pastes several items: text in one go, joined line by line; images
     /// and files one after another, since most apps take only the first
-    /// thing on the clipboard.
-    func paste(_ items: [ShelfItem]) {
-        guard !items.isEmpty else { return }
-        if items.count == 1 || items.allSatisfy({ $0.kind == .text }) {
+    /// thing on the clipboard. `completion` runs once the last ⌘V is sent.
+    func paste(_ items: [ShelfItem], completion: (() -> Void)? = nil) {
+        guard !items.isEmpty else { completion?(); return }
+        // Without the Accessibility permission the ⌘V is silently dropped:
+        // leave the item on the clipboard and ask for the permission.
+        guard ModifierMonitor.isTrusted(prompt: true) else {
             copy(items)
-            Self.pressPaste(after: 0.18)
+            completion?()
             return
         }
-        for (n, item) in items.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4 * Double(n)) { [weak self] in
+        let groups: [[ShelfItem]] = items.count == 1 || items.allSatisfy({ $0.kind == .text })
+            ? [items] : items.map { [$0] }
+        pasteNext(groups[...], completion: completion)
+    }
+
+    private func pasteNext(_ groups: ArraySlice<[ShelfItem]>, completion: (() -> Void)?) {
+        guard let group = groups.first else { completion?(); return }
+        copy(group)
+        Self.whenTargetIsReady { [weak self] in
+            Self.pressPaste()
+            let rest = groups.dropFirst()
+            guard !rest.isEmpty else { completion?(); return }
+            // Gives the app time to read the clipboard before it changes.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 MainActor.assumeIsolated {
-                    self?.copy(item)
-                    Self.pressPaste(after: 0.18)
+                    guard let self else { completion?(); return }
+                    self.pasteNext(rest, completion: completion)
                 }
             }
         }
     }
 
-    nonisolated private static func pressPaste(after delay: Double) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            let source = CGEventSource(stateID: .combinedSessionState)
-            let vKey: CGKeyCode = 9
-            let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)
-            let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
-            down?.flags = .maskCommand
-            up?.flags = .maskCommand
-            down?.post(tap: .cghidEventTap)
-            up?.post(tap: .cghidEventTap)
+    /// Waits until the launcher has handed the keyboard back to the other
+    /// app and the keys that ran the row are let go, so the ⌘V reaches
+    /// that app and not the closing launcher. A fixed delay lost the
+    /// keystroke whenever the hand-off was slow.
+    private static func whenTargetIsReady(_ body: @escaping @MainActor () -> Void) {
+        let start = Date()
+        let ownPid = ProcessInfo.processInfo.processIdentifier
+        func check() {
+            let elapsed = Date().timeIntervalSince(start)
+            let keyReturned = NSApp.keyWindow == nil
+                && NSWorkspace.shared.frontmostApplication?.processIdentifier != ownPid
+            let flags = CGEventSource.flagsState(.combinedSessionState)
+            let modifiersUp = flags.isDisjoint(with: [.maskAlternate, .maskShift, .maskControl])
+            if (elapsed >= 0.08 && keyReturned && modifiersUp) || elapsed >= 1.2 {
+                // A little more for the app to make its window key again.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    MainActor.assumeIsolated { body() }
+                }
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                MainActor.assumeIsolated { check() }
+            }
+        }
+        check()
+    }
+
+    private static func pressPaste() {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        // Keys pressed while the events go out are not held back.
+        source?.setLocalEventsFilterDuringSuppressionState(
+            [.permitLocalMouseEvents, .permitSystemDefinedEvents],
+            state: .eventSuppressionStateSuppressionInterval)
+        let vKey = keyCode(for: "v") ?? 9
+        let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
+        // The left-⌘ device bit too: some apps check it, not just the ⌘ flag.
+        let flags = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x8)
+        down?.flags = flags
+        up?.flags = flags
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
+    }
+
+    /// The key that types `character` with ⌘ held on the current layout,
+    /// so ⌘V still works on Dvorak or other non-QWERTY layouts.
+    private static func keyCode(for character: String) -> CGKeyCode? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        else { return nil }
+        let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+        return data.withUnsafeBytes { raw -> CGKeyCode? in
+            guard let layout = raw.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return nil }
+            let modifiers = UInt32((cmdKey >> 8) & 0xFF)
+            for code in 0..<128 {
+                var deadKeys: UInt32 = 0
+                var length = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), modifiers,
+                                            UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                                            &deadKeys, chars.count, &length, &chars)
+                if status == noErr, length > 0,
+                   String(utf16CodeUnits: chars, count: length).lowercased() == character {
+                    return CGKeyCode(code)
+                }
+            }
+            return nil
         }
     }
 
