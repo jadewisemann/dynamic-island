@@ -21,6 +21,9 @@ final class InputSourceSwitcher {
         TISSelectInputSource(english)
     }
 
+    /// True while a switched-away input source is waiting to be put back.
+    var isHolding: Bool { saved != nil }
+
     func restore() {
         guard let saved else { return }
         self.saved = nil

@@ -350,7 +350,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return self.shelf.items
         }
         launcher.onCopyShelf = { [weak self] items in self?.shelf.copy(items) }
-        launcher.onPasteShelf = { [weak self] items in self?.shelf.paste(items) }
+        launcher.onPasteShelf = { [weak self] items in
+            guard let self else { return }
+            let restoreInput = self.model.holdInputSourceForPaste()
+            self.shelf.paste(items) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    MainActor.assumeIsolated { restoreInput() }
+                }
+            }
+        }
         launcher.onRemoveShelf = { [weak self] item in self?.shelf.remove(item) }
         launcher.shelfDragProvider = { [weak self] item in self?.shelf.itemProvider(item) ?? NSItemProvider() }
         configureShelf(configStore.config)

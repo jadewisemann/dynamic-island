@@ -89,6 +89,7 @@ final class IslandModel: ObservableObject {
     /// Search mode (phase .launcher).
     let launcher = LauncherModel()
     private let inputSwitcher = InputSourceSwitcher()
+    private var inputRestoreWork: DispatchWorkItem?
     /// Height of the launcher below the workspace row, kept here so the
     /// island's size animates with the result list.
     @Published private(set) var launcherHeight: CGFloat = 0
@@ -169,15 +170,34 @@ final class IslandModel: ObservableObject {
         collapseWork?.cancel()
         if phase == .notification { interruptNotification() }
         clearMissed()
-        if config.launcher.englishInput { inputSwitcher.switchToEnglish() }
+        inputRestoreWork?.cancel()
+        inputRestoreWork = nil
+        // A paste still holding the English input source keeps what it saved.
+        if config.launcher.englishInput, !inputSwitcher.isHolding { inputSwitcher.switchToEnglish() }
         launcher.begin()
         launcherHeight = launcher.bodyHeight
         setPhase(.launcher)
     }
 
+    /// Keeps the launcher's English input source until a paste has sent
+    /// its ⌘V: switching back to Korean at the same moment can swallow the
+    /// keystroke. Call it right after the launcher closes; run the result
+    /// once the paste is done.
+    func holdInputSourceForPaste() -> () -> Void {
+        guard let work = inputRestoreWork else { return {} }
+        work.cancel()
+        inputRestoreWork = nil
+        return { [weak self] in
+            guard let self, self.phase != .launcher else { return }
+            self.inputSwitcher.restore()
+        }
+    }
+
     func closeLauncher() {
         guard phase == .launcher else { return }
-        inputSwitcher.restore()
+        // Put back on the next turn, so a paste run from this row can hold it.
+        inputRestoreWork?.cancel()
+        inputRestoreWork = after(ms: 0) { [weak self] in self?.inputSwitcher.restore() }
         pointerInside = false
         setPhase(modifierHeld ? .compact : .hidden)
         if !modifierHeld { showNextNotification() }
