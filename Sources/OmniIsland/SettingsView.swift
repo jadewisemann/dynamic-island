@@ -867,6 +867,7 @@ private struct WidgetSettings: View {
             Text("다음 일정").tag("nextEvent")
             Text("놓친 알림 수").tag("notifications")
             Text("코딩 에이전트").tag("agents")
+            Text("AI 사용량").tag("usage")
             Text("없음").tag("none")
         }
     }
@@ -876,7 +877,7 @@ private struct WidgetSettings: View {
 
 /// The widgets that can go into a side panel slot.
 enum PanelWidgetKind: String, CaseIterable, Identifiable {
-    case clock, calendar, nextEvent, events, notifications, agents
+    case clock, calendar, nextEvent, events, notifications, agents, usage
 
     var id: String { rawValue }
 
@@ -888,6 +889,7 @@ enum PanelWidgetKind: String, CaseIterable, Identifiable {
         case .events: return "오늘 일정"
         case .notifications: return "최근 알림"
         case .agents: return "코딩 에이전트"
+        case .usage: return "AI 사용량"
         }
     }
 
@@ -899,6 +901,7 @@ enum PanelWidgetKind: String, CaseIterable, Identifiable {
         case .events: return "list.bullet.rectangle"
         case .notifications: return "bell.badge"
         case .agents: return "sparkle"
+        case .usage: return "gauge.with.dots.needle.33percent"
         }
     }
 
@@ -1098,6 +1101,7 @@ private struct NotificationSettings: View {
                               range: 200...3000, step: 100, unit: "ms")
                     Toggle("큰 시계", isOn: itemBinding("clock"))
                     Toggle("오늘 남은 일정", isOn: itemBinding("events"))
+                    Toggle("AI 사용량", isOn: itemBinding("usage"))
                     Toggle("최근 알림", isOn: itemBinding("notifications"))
                 }
             } header: {
@@ -1157,7 +1161,7 @@ private struct NotificationSettings: View {
         Binding(
             get: { model.draft.dashboard.items.contains(item) },
             set: { on in
-                let order = ["clock", "events", "notifications"]
+                let order = ["clock", "events", "usage", "notifications"]
                 var items = model.draft.dashboard.items.filter { $0 != item }
                 if on { items.append(item) }
                 model.draft.dashboard.items = order.filter(items.contains)
@@ -1405,6 +1409,18 @@ private struct AgentSettings: View {
                     .foregroundStyle(.secondary)
             }
             .disabled(!model.draft.agents.enabled)
+
+            Section {
+                Toggle("Claude Code 사용량 보여 주기", isOn: $model.draft.usage.enabled)
+                Toggle("요금제 한도(5시간·주간 %) 가져오기", isOn: $model.draft.usage.planLimits)
+                    .disabled(!model.draft.usage.enabled)
+            } header: {
+                Text("AI 사용량")
+            } footer: {
+                Text("노치 옆 날개, 좌우 위젯 칸, 대시보드에 \"AI 사용량\"을 넣으면 보입니다. 토큰 수는 ~/.claude/projects에 남는 Claude Code 기록에서 읽습니다. 한도는 키체인에 저장된 Claude Code 로그인으로 Claude Code의 /usage와 같은 곳에서 5분마다 가져옵니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Section("Codex") {
                 Text("~/.codex/config.toml에 다음 줄을 넣으면 Codex가 답을 마칠 때 알립니다.")

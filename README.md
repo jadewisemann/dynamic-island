@@ -161,7 +161,7 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `layout.widthMode` / `fixedWidth` | `"auto"` / `420` | `fixed`이면 아일랜드가 적어도 `fixedWidth`만큼 넓어집니다. |
 | `layout.rowAlignment` / `contentPadding` | `"center"` / `20` | 워크스페이스 줄 정렬(`center`, `leading`, `spread`)과 안쪽 여백입니다. |
 | `layout.eventPlacement` | `"below"` | 이동 알림을 워크스페이스 줄 아래(`below`), 위(`above`), 또는 줄 대신(`replace`) 보여 줍니다. |
-| `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `nextEvent`(다음 일정), `notifications`(놓친 알림 수), `agents`(코딩 에이전트), `none` 중 하나입니다. |
+| `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `nextEvent`(다음 일정), `notifications`(놓친 알림 수), `agents`(코딩 에이전트), `usage`(AI 사용량), `none` 중 하나입니다. |
 | `widgets.leftPanel` / `rightPanel` | `["clock"]` / `["calendar"]` | 워크스페이스 줄이 보일 때 아일랜드 양옆에 붙는 정사각형 위젯 칸입니다. `clock`, `calendar`, `nextEvent`, `events`, `notifications`를 순서대로 적고, 비우면 그쪽 칸이 없습니다. |
 | `widgets.panelUnits` | `1` | 한쪽 칸의 너비를 정사각형 1~3칸으로 정합니다. 2칸 이상이면 위젯이 넓은 모양(큰 시계, 2주 달력, 일정 목록)으로 바뀝니다. |
 | `widgets.workspaceLabel` | `"name"` | 워크스페이스를 OmniWM 표시 이름(`name`), 번호(`number`), 번호와 이름(`both`)으로 보여 줍니다. |
@@ -262,6 +262,7 @@ macOS에는 다른 앱의 알림을 읽는 공식 API가 없어서, 두 가지 �
 - 두 경로가 같은 알림을 보면 20초 안의 같은 내용은 한 번만 보여 줍니다.
 - 데이터베이스 파일이 바뀌는 순간을 감지해서 바로 읽고, 1초 주기 확인은 보조로만 씁니다. 배너 관찰도 0.75초마다 확인합니다.
 - **오른쪽 macOS 배너 없애기**: 데이터베이스 읽기를 켜 둔 상태에서 시스템 설정 → 알림 → 앱마다 알림 스타일을 "없음"으로 바꾸면 배너는 뜨지 않고, 알림은 알림 센터와 아일랜드에 그대로 들어옵니다. 앱별 설정을 바꾸고 싶지 않다면 설정의 "macOS 기본 배너 닫기"를 켭니다. 이 경우 배너가 잠깐 보였다가 닫힙니다.
+- **알림 닫기**: 카드 오른쪽 위의 ×를 누르면 그 알림만 닫고 다음 알림으로 넘어갑니다. 기다리는 알림이 있으면 **모두 닫기** 버튼이 함께 나타나며, 누르면 대기 중인 알림과 노치 옆의 놓친 알림 표시, 화면 오른쪽에 남은 시스템 배너까지 한꺼번에 닫습니다.
 - **지난 알림 다시 보기**: 알림 카드를 누르면 그 앱이 열리고, 카드에 마우스를 올려 두면 닫히지 않습니다. 받은 알림은 최근 30개까지 기억해서 대시보드(Option 길게 누르기, `dashboard.enabled`)와 메뉴 막대 아이콘의 "최근 알림"에서 다시 볼 수 있습니다. 항목을 누르면 해당 앱이 열립니다.
 - 배너 판독이 맞지 않으면 메뉴 막대 아이콘 → 알림 → "알림 배너 구조 기록 (1분)"을 누릅니다. 테스트 알림을 보내고 1분 동안 권한 상태, 데이터베이스 상태, 배너 구조를 `~/Library/Logs/OmniIsland/notification-banners.log`에 남긴 뒤 Finder로 보여 줍니다. 평소 동작 기록은 `~/Library/Logs/OmniIsland/omni-island.log`에 남습니다.
 
@@ -290,6 +291,19 @@ macOS에는 다른 앱의 알림을 읽는 공식 API가 없어서, 두 가지 �
 | `agents.approvals` / `approvalTimeoutSec` | `true` / `120` | 권한 요청에 버튼을 띄우는지와, 응답을 기다리는 시간입니다. |
 | `agents.notifyDone` / `notifyWaiting` | `true` / `true` | 완료와 입력 대기 카드를 띄웁니다. |
 | `agents.cardDurationMs` / `keepDoneMin` | `5000` / `30` | 카드 표시 시간과, 끝난 세션을 위젯에 남겨 두는 시간(분)입니다. |
+
+### AI 사용량
+
+노치 옆 날개(`widgets.leftWing`/`rightWing`), 좌우 위젯 칸(`leftPanel`/`rightPanel`), 대시보드(`dashboard.items`)에 `usage`를 넣으면 Claude Code 사용량이 보입니다.
+
+- **토큰 수**: `~/.claude/projects`(그리고 `CLAUDE_CONFIG_DIR`)에 Claude Code가 남기는 대화 기록을 읽어서 지금 5시간 세션과 오늘 쓴 토큰을 셉니다. 네트워크를 쓰지 않습니다.
+- **요금제 한도**: `usage.planLimits`가 켜져 있으면, 키체인에 저장된 Claude Code 로그인으로 Claude Code의 `/usage` 화면과 같은 곳에서 5시간·주간 한도 사용률(%)과 리셋 시각을 5분마다 가져옵니다. 로그인이 없거나 만료되었으면 토큰 수만 보여 줍니다.
+
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `usage.enabled` | `true` | 사용량을 읽습니다. `usage` 위젯을 넣었을 때만 동작합니다. |
+| `usage.planLimits` | `true` | 요금제 한도(%)도 가져옵니다. |
+| `usage.refreshSec` | `60` | 기록을 다시 읽는 간격(초)입니다. |
 
 ### 터미널에서 앱 열기
 
