@@ -305,8 +305,13 @@ struct IslandConfig: Equatable {
         /// Trigger prefix of each built-in app: typing it and a space enters
         /// that app alone. "" turns the prefix off.
         var prefixes: [String: String] = Launcher.defaultPrefixes
+        /// Saved links found by name or keyword ("gh owner/repo").
+        var quickLinks: [QuickLink] = QuickLink.examples
+        /// Quick Links in the top-level search (they always have their own mode).
+        var searchQuickLinks = true
 
-        static let defaultPrefixes = ["clipboard": "c", "windows": "w", "settings": "s", "files": "f", "apps": ""]
+        static let defaultPrefixes = ["clipboard": "c", "windows": "w", "settings": "s", "files": "f", "apps": "",
+                                      "quicklinks": ""]
     }
 
     /// Coding agents (Claude Code, Codex) reporting through `omni-island hook`.
@@ -684,6 +689,17 @@ extension IslandConfig {
         for (key, value) in la.sub("prefixes").dict {
             if let text = value as? String { c.launcher.prefixes[key] = text.trimmingCharacters(in: .whitespaces) }
         }
+        c.launcher.searchQuickLinks = la.bool("searchQuickLinks", c.launcher.searchQuickLinks)
+        // A file without the key gets the examples; an empty list stays empty.
+        if la.dict["quickLinks"] is [Any] {
+            c.launcher.quickLinks = la.objects("quickLinks").compactMap { entry in
+                func text(_ key: String) -> String {
+                    (entry[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                let link = QuickLink(name: text("name"), link: text("link"), keyword: text("keyword"), app: text("app"))
+                return link.isValid ? link : nil
+            }
+        }
 
         let sh = r.sub("shelf")
         c.shelf.enabled = sh.bool("enabled", c.shelf.enabled)
@@ -829,6 +845,14 @@ extension IslandConfig {
         return lines.map { indent + $0 }.joined(separator: "\n")
     }
 
+    fileprivate static func quickLinkLine(_ link: QuickLink) -> String {
+        var dict = ["name": link.name, "link": link.link]
+        if !link.keyword.isEmpty { dict["keyword"] = link.keyword }
+        if !link.app.isEmpty { dict["app"] = link.app }
+        let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys, .withoutEscapingSlashes])
+        return data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+
     fileprivate static func savedThemeLine(_ theme: SavedTheme) -> String {
         var dict = theme.colors.dictionary
         dict["name"] = theme.name
@@ -846,11 +870,12 @@ extension IslandConfig {
         func list(_ values: [String]) -> String { "[" + values.map { q($0) }.joined(separator: ", ") + "]" }
         func numberList(_ values: [Double]) -> String { "[" + values.map { n($0) }.joined(separator: ", ") + "]" }
         func prefixList(_ values: [String: String]) -> String {
-            let order = ["clipboard", "windows", "settings", "files", "apps"]
+            let order = ["clipboard", "windows", "settings", "files", "apps", "quicklinks"]
             let keys = order.filter { values[$0] != nil } + values.keys.filter { !order.contains($0) }.sorted()
             return "{ " + keys.map { "\(q($0)): \(q(values[$0] ?? ""))" }.joined(separator: ", ") + " }"
         }
         let saved = th.saved.map { "      " + Self.savedThemeLine($0) + "," }.joined(separator: "\n")
+        let quickLinks = la.quickLinks.map { "      " + Self.quickLinkLine($0) + "," }.joined(separator: "\n")
 
         return """
         // OmniIsland 설정 파일 (JSON5: 주석과 끝 쉼표를 쓸 수 있습니다)
@@ -1074,8 +1099,15 @@ extension IslandConfig {
             "width": \(n(la.width)),
             // 내장 앱의 트리거 접두어입니다. 접두어 다음에 스페이스를 누르면 그 앱만 보입니다.
             // 한글 자판으로 친 글자(ㅊ, ㅈ, ㄴ, ㄹ)도 됩니다. ""로 두면 접두어를 쓰지 않습니다.
-            // clipboard: 클립보드 관리자, windows: 창 관리자, settings: 설정 관리자, files: 파일 검색, apps: 앱
+            // clipboard: 클립보드 관리자, windows: 창 관리자, settings: 설정 관리자, files: 파일 검색, apps: 앱, quicklinks: Quick Links
             "prefixes": \(prefixList(la.prefixes)),
+            // Quick Links: 이름이나 키워드로 찾아 여는 링크입니다. link에는 웹 주소, obsidian:// 같은 URL,
+            // ~/Downloads 같은 파일·폴더 경로를 적습니다. {query}를 넣으면 "키워드 + 스페이스" 다음에 입력한
+            // 내용으로 바뀝니다 (예: gh owner/repo). app에 앱 이름이나 번들 ID를 적으면 그 앱으로 엽니다.
+            "searchQuickLinks": \(b(la.searchQuickLinks)),
+            "quickLinks": [
+        \(quickLinks)
+            ],
           },
 
           "shelf": {

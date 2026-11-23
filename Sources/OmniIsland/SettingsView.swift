@@ -1221,6 +1221,9 @@ private struct LauncherSettings: View {
             }
             .disabled(!model.draft.launcher.enabled)
 
+            QuickLinkSettings(model: model)
+                .disabled(!model.draft.launcher.enabled)
+
             Section("기본 검색에 포함할 것") {
                 Toggle("앱", isOn: $model.draft.launcher.searchApps)
                 Toggle("OmniWM에 열려 있는 창", isOn: $model.draft.launcher.searchWindows)
@@ -1289,6 +1292,7 @@ private struct LauncherSettings: View {
         ("settings", "설정 관리자", "gearshape.fill"),
         ("files", "파일 검색", "doc.text.magnifyingglass"),
         ("apps", "앱", "square.grid.2x2"),
+        ("quicklinks", "Quick Links", "link"),
     ]
 
     private func prefixBinding(_ id: String) -> Binding<String> {
@@ -1302,6 +1306,137 @@ private struct LauncherSettings: View {
         let current = model.draft.launcher.hotkey
         if Self.hotkeys.contains(where: { $0.0 == current }) { return Self.hotkeys }
         return Self.hotkeys + [(current, "사용자 지정: \(HotKeyMonitor.symbols(current))")]
+    }
+}
+
+/// The Quick Links list: add, edit and remove saved links. Edits happen in
+/// local fields and reach the config only on 저장, so a half-typed link is
+/// never written to the file.
+private struct QuickLinkSettings: View {
+    @ObservedObject var model: SettingsModel
+    /// The link being edited: its index, or -1 for a new one.
+    @State private var editing: Int?
+    @State private var form = QuickLink()
+
+    private var links: [QuickLink] { model.draft.launcher.quickLinks }
+
+    var body: some View {
+        Section {
+            Toggle("기본 검색에 포함하기", isOn: $model.draft.launcher.searchQuickLinks)
+            ForEach(Array(links.enumerated()), id: \.offset) { index, link in
+                if editing == index {
+                    editor
+                } else {
+                    row(index, link)
+                }
+            }
+            if editing == -1 {
+                editor
+            } else {
+                Button {
+                    form = QuickLink()
+                    editing = -1
+                } label: {
+                    Label("링크 추가", systemImage: "plus")
+                }
+                .disabled(editing != nil)
+            }
+            Text("런처에서 이름이나 키워드로 찾아 Return을 누르면 링크를 엽니다. 링크에 {query}를 넣으면, 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드가 gh이고 링크가 https://github.com/{query}이면, gh jadewisemann/dynamic-island를 입력해서 그 저장소를 엽니다. 키워드만 입력하고 Return이나 Tab을 눌러도 같은 상태가 됩니다. 링크에는 웹 주소뿐 아니라 obsidian://, mailto: 같은 URL이나 ~/Downloads 같은 파일·폴더 경로도 적을 수 있습니다. ⌘Return은 열지 않고 주소만 복사합니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("Quick Links")
+        }
+    }
+
+    private func row(_ index: Int, _ link: QuickLink) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: link.needsInput ? "magnifyingglass" : link.isFile ? "folder" : "link")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(link.name)
+                Text(link.app.isEmpty ? link.link : "\(link.link) · \(link.app)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            if !link.keyword.isEmpty {
+                Text(link.keyword)
+                    .font(.caption.monospaced())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+            }
+            Button("편집") {
+                form = link
+                editing = index
+            }
+            .disabled(editing != nil)
+            Button(role: .destructive) {
+                model.draft.launcher.quickLinks.remove(at: index)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .disabled(editing != nil)
+            .help("삭제")
+        }
+    }
+
+    private var trimmed: QuickLink {
+        QuickLink(name: form.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                  link: form.link.trimmingCharacters(in: .whitespacesAndNewlines),
+                  keyword: form.keyword.replacingOccurrences(of: " ", with: ""),
+                  app: form.app.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private var preview: String? {
+        let link = trimmed
+        guard !link.link.isEmpty, let url = link.url(argument: link.needsInput ? "example" : nil) else { return nil }
+        return url.isFileURL ? url.path : url.absoluteString
+    }
+
+    @ViewBuilder private var editor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("이름", text: $form.name, prompt: Text("GitHub 저장소"))
+            TextField("링크", text: $form.link, prompt: Text("https://github.com/{query}"))
+            TextField("키워드", text: $form.keyword, prompt: Text("gh (선택)"))
+            TextField("열 앱", text: $form.app, prompt: Text("비워 두면 기본 앱 (Safari, com.google.Chrome)"))
+            if let preview {
+                Text(trimmed.needsInput ? "example을 입력하면: \(preview)" : "열 주소: \(preview)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            if !trimmed.app.isEmpty && trimmed.appURL == nil {
+                Text("이 이름의 앱을 찾지 못했습니다. 앱 이름, 번들 ID, 또는 .app 경로를 적어 주세요.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                Button("취소") { editing = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("저장") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!trimmed.isValid)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func save() {
+        let link = trimmed
+        guard link.isValid, let index = editing else { return }
+        if index >= 0 && index < links.count {
+            model.draft.launcher.quickLinks[index] = link
+        } else {
+            model.draft.launcher.quickLinks.append(link)
+        }
+        editing = nil
     }
 }
 

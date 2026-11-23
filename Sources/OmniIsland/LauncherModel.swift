@@ -26,6 +26,9 @@ struct LauncherItem: Identifiable, Equatable {
         case shelf(ShelfItem)
         /// A built-in app to enter (its id).
         case plugin(String)
+        /// A saved link, with the text that fills its `{query}` (nil when
+        /// the trigger hasn't been typed yet).
+        case quickLink(QuickLink, argument: String?)
     }
 
     /// Where a row goes at the top level: answers first, the web last.
@@ -56,6 +59,7 @@ struct LauncherItem: Identifiable, Equatable {
         case .web: return "웹"
         case .shelf: return "클립보드"
         case .plugin: return "내장 앱"
+        case .quickLink: return "링크"
         }
     }
 }
@@ -112,7 +116,7 @@ final class LauncherModel: ObservableObject {
         plugins = [
             CalculatorPlugin(host: self), CurrencyPlugin(host: self), AppsPlugin(host: self),
             WindowsPlugin(host: self), SettingsPlugin(host: self), FilesPlugin(host: self),
-            ClipboardPlugin(host: self), web,
+            ClipboardPlugin(host: self), QuickLinksPlugin(host: self), web,
         ]
         apps.onUpdate = { [weak self] in self?.refresh() }
     }
@@ -243,6 +247,7 @@ final class LauncherModel: ObservableObject {
             enter(target)
             return true
         }
+        if results.indices.contains(selection), fillQuickLink(results[selection]) { return true }
         if allowsMarking {
             toggleMark(advance: true)
             return true
@@ -329,12 +334,28 @@ final class LauncherModel: ObservableObject {
             if let target = plugin(id: id) { enter(target) }
             return
         }
+        if fillQuickLink(first) { return }
         guard let target = plugin(id: first.plugin), target.canActivate(first) else { return }
         if config.learnFromPicks {
             for item in items where item.group == .local { picks.record(item.id, query: trimmedQuery) }
         }
         onClose?()
         target.activate(items, alternate: alternate)
+    }
+
+    /// A link that asks for text and has none: types its keyword (or name)
+    /// and a space, so what comes next fills its `{query}`.
+    private func fillQuickLink(_ item: LauncherItem) -> Bool {
+        guard case .quickLink(let link, let argument) = item.kind, link.needsInput,
+              (argument ?? "").isEmpty else { return false }
+        let text = QuickLinksPlugin.trigger(of: link) + " "
+        guard query != text else { return true }
+        query = text
+        selection = 0
+        querySerial &+= 1
+        refresh()
+        scheduleAsync()
+        return true
     }
 
     /// ⌘⌫: removes the selected row where its plugin allows it.

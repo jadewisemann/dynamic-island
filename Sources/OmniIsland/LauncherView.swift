@@ -188,6 +188,12 @@ private struct LauncherRow: View {
             symbol(name)
         case .plugin(let id):
             symbol(model.launcher.plugin(id: id)?.symbol ?? "square.grid.2x2")
+        case .quickLink(let link, _):
+            if let path = QuickLinkIcons.shared.handler(link) {
+                LauncherIcon(path: path)
+            } else {
+                symbol(link.needsInput ? "magnifyingglass" : "link")
+            }
         case .shelf(let shelfItem):
             if let image = ShelfThumbnails.image(shelfItem) {
                 Image(nsImage: image)
@@ -240,6 +246,21 @@ final class LauncherIconCache {
         let image = NSWorkspace.shared.icon(forFile: path)
         cache[path] = image
         return image
+    }
+}
+
+/// The app (or file) each link opens, looked up once per link.
+@MainActor
+final class QuickLinkIcons {
+    static let shared = QuickLinkIcons()
+    private var cache: [String: String?] = [:]
+
+    func handler(_ link: QuickLink) -> String? {
+        let key = link.link + "\u{0}" + link.app
+        if let cached = cache[key] { return cached }
+        let path = link.handlerPath
+        cache[key] = .some(path)
+        return path
     }
 }
 
