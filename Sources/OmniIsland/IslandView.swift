@@ -412,6 +412,20 @@ struct WingView: View {
             }
         case "agents":
             AgentWing(model: model, size: size)
+        case "usage":
+            if let usage = model.aiUsage {
+                HStack(spacing: 4) {
+                    UsageRing(fraction: (usage.fiveHour?.percent ?? 0) / 100,
+                              color: UsageColor.color(usage.fiveHour?.percent, palette: p),
+                              track: p.fill.opacity(0.18), lineWidth: 2.2)
+                        .frame(width: size * 0.85, height: size * 0.85)
+                    Text(usage.shortText)
+                        .font(model.numberFont(size: size * 0.85, weight: .semibold))
+                        .foregroundStyle(p.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                }
+            }
         default:
             EmptyView()
         }

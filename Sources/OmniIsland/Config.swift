@@ -20,9 +20,17 @@ struct IslandConfig: Equatable {
     var dashboard = Dashboard()
     var launcher = Launcher()
     var agents = Agents()
+    var usage = Usage()
     var shelf = Shelf()
     // JSON key "animation"; named `motion` in Swift because `Binding.animation(_:)` would shadow it.
     var motion = AnimationConfig()
+
+    /// Some wing, side panel or dashboard item shows AI usage.
+    var showsUsage: Bool {
+        let w = widgets
+        let names = [w.leftWing, w.rightWing] + w.leftPanel + w.rightPanel + (dashboard.enabled ? dashboard.items : [])
+        return names.contains { $0.lowercased() == "usage" }
+    }
 
     struct Trigger: Equatable {
         /// option | leftOption | rightOption | command | leftCommand | rightCommand |
@@ -194,7 +202,7 @@ struct IslandConfig: Equatable {
 
     struct Widgets: Equatable {
         /// Content of the notch-height strip, left and right of the notch:
-        /// app | workspace | clock | date | windows | nextEvent | notifications | agents | none
+        /// app | workspace | clock | date | windows | nextEvent | notifications | agents | usage | none
         var leftWing = "app"
         var rightWing = "workspace"
         /// name | number | both
@@ -206,7 +214,7 @@ struct IslandConfig: Equatable {
         var clockFormat = "24h"
         /// Square widget tiles attached to the left and right of the island
         /// while the workspace row is shown:
-        /// clock | calendar | nextEvent | events | notifications | agents
+        /// clock | calendar | nextEvent | events | notifications | agents | usage
         var leftPanel = ["clock"]
         var rightPanel = ["calendar"]
         /// Width of each side panel in squares (1–3). More widgets than
@@ -254,7 +262,7 @@ struct IslandConfig: Equatable {
         var enabled = false
         /// Extra hold time after the workspace row appears.
         var holdMs = 800.0
-        /// clock | events | notifications, in display order.
+        /// clock | events | usage | notifications, in display order.
         var items = ["clock", "events", "notifications"]
     }
 
@@ -325,6 +333,16 @@ struct IslandConfig: Equatable {
         var cardDurationMs = 5000.0
         /// Finished sessions stay in the agents widget this long.
         var keepDoneMin = 30.0
+    }
+
+    /// Claude Code usage for the `usage` wing, panel and dashboard item.
+    struct Usage: Equatable {
+        var enabled = true
+        /// Also read the plan limits (5-hour and weekly %) with Claude
+        /// Code's sign-in from the keychain.
+        var planLimits = true
+        /// How often the local transcripts are read again.
+        var refreshSec = 60.0
     }
 
     struct AnimationConfig: Equatable {
@@ -683,6 +701,11 @@ extension IslandConfig {
         c.agents.cardDurationMs = ag.number("cardDurationMs", c.agents.cardDurationMs)
         c.agents.keepDoneMin = ag.number("keepDoneMin", c.agents.keepDoneMin)
 
+        let us = r.sub("usage")
+        c.usage.enabled = us.bool("enabled", c.usage.enabled)
+        c.usage.planLimits = us.bool("planLimits", c.usage.planLimits)
+        c.usage.refreshSec = us.number("refreshSec", c.usage.refreshSec)
+
         let n = r.sub("animation")
         c.motion.style = n.string("style", c.motion.style)
         c.motion.response = n.number("response", c.motion.response)
@@ -819,7 +842,7 @@ extension IslandConfig {
         let q = Self.quote, n = Self.number
         func b(_ v: Bool) -> String { v ? "true" : "false" }
         let t = trigger, be = behavior, a = appearance, an = motion, th = theme, l = layout, w = widgets
-        let no = notifications, ca = calendar, d = dashboard, la = launcher, ag = agents, sh = shelf
+        let no = notifications, ca = calendar, d = dashboard, la = launcher, ag = agents, us = usage, sh = shelf
         func list(_ values: [String]) -> String { "[" + values.map { q($0) }.joined(separator: ", ") + "]" }
         func numberList(_ values: [Double]) -> String { "[" + values.map { n($0) }.joined(separator: ", ") + "]" }
         func prefixList(_ values: [String: String]) -> String {
@@ -952,7 +975,7 @@ extension IslandConfig {
 
           "widgets": {
             // 노치 양옆에 보여 줄 내용:
-            // app | workspace | clock | date | windows | nextEvent(다음 일정) | notifications(놓친 알림 수) | none
+            // app | workspace | clock | date | windows | nextEvent(다음 일정) | notifications(놓친 알림 수) | agents | usage(AI 사용량) | none
             "leftWing": \(q(w.leftWing)),
             "rightWing": \(q(w.rightWing)),
             // 워크스페이스 이름: name(OmniWM 표시 이름) | number(번호) | both(번호와 이름)
@@ -964,7 +987,7 @@ extension IslandConfig {
             // 24h | 12h | 24hSeconds
             "clockFormat": \(q(w.clockFormat)),
             // 워크스페이스 줄이 보일 때 좌우에 붙는 정사각형 위젯 칸입니다. 비우면 그쪽 칸이 없습니다.
-            // clock(시계) | calendar(달력) | nextEvent(다음 일정) | events(오늘 일정) | notifications(최근 알림)
+            // clock(시계) | calendar(달력) | nextEvent(다음 일정) | events(오늘 일정) | notifications(최근 알림) | agents | usage(AI 사용량)
             "leftPanel": \(list(w.leftPanel)),
             "rightPanel": \(list(w.rightPanel)),
             // 한쪽 칸의 너비를 정사각형 몇 칸으로 할지 정합니다 (1~3).
@@ -1009,7 +1032,7 @@ extension IslandConfig {
             "enabled": \(b(d.enabled)),
             // 워크스페이스 줄이 나타난 뒤 이만큼 더 누르고 있으면 펼칩니다.
             "holdMs": \(n(d.holdMs)),
-            // clock | events | notifications (적은 순서대로 보여 줍니다)
+            // clock | events | usage(AI 사용량) | notifications (적은 순서대로 보여 줍니다)
             "items": \(list(d.items)),
           },
 
@@ -1078,6 +1101,15 @@ extension IslandConfig {
             "cardDurationMs": \(n(ag.cardDurationMs)),
             // 끝난 세션을 에이전트 위젯에 남겨 두는 시간(분)입니다.
             "keepDoneMin": \(n(ag.keepDoneMin)),
+          },
+
+          "usage": {
+            // Claude Code 사용량을 보여 줍니다. 위젯(노치 옆, 좌우 칸, 대시보드)에 usage를 넣으면 나타납니다.
+            // 토큰 수는 ~/.claude/projects 기록에서 읽습니다.
+            "enabled": \(b(us.enabled)),
+            // 키체인에 있는 Claude Code 로그인으로 요금제 한도(5시간·주간 %)도 가져옵니다.
+            "planLimits": \(b(us.planLimits)),
+            "refreshSec": \(n(us.refreshSec)),
           },
 
           "animation": {

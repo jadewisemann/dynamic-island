@@ -53,6 +53,16 @@ struct NotificationCard: View {
                             .background(Capsule().fill(p.fill.opacity(0.16)))
                             .contentTransition(.numericText())
                     }
+                    if !model.notificationQueue.isEmpty {
+                        CardButton(model: model, label: "모두 닫기", symbol: nil) {
+                            model.closeAllNotifications()
+                        }
+                        .help("기다리는 알림까지 모두 닫습니다")
+                    }
+                    CardButton(model: model, label: nil, symbol: "xmark") {
+                        model.closeNotification()
+                    }
+                    .help("이 알림 닫기")
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(text.title)
@@ -106,6 +116,41 @@ struct NotificationCard: View {
         let subtitle = notification.source == .calendar ? nil : text.subtitle
         let parts = [subtitle, text.body].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? nil : parts.joined(separator: " — ")
+    }
+}
+
+/// Small close button in the card header: a text capsule or an icon circle.
+private struct CardButton: View {
+    @ObservedObject var model: IslandModel
+    let label: String?
+    let symbol: String?
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let p = model.palette
+        let size = CGFloat(model.config.appearance.fontSize)
+        Group {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.55, weight: .bold))
+                    .frame(width: size * 1.15, height: size * 1.15)
+                    .background(Circle().fill(p.fill.opacity(hovering ? 0.28 : 0.14)))
+                    .contentShape(Circle())
+            } else if let label {
+                Text(label)
+                    .font(model.textFont(size: size * 0.7, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(p.fill.opacity(hovering ? 0.28 : 0.14)))
+                    .contentShape(Capsule())
+            }
+        }
+        .foregroundStyle(hovering ? p.text : p.secondary)
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: action)
     }
 }
 
@@ -190,6 +235,9 @@ struct DashboardView: View {
                     }
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
+            }
+            if items.contains("usage") {
+                UsageDashboardRow(model: model)
             }
             if items.contains("notifications") {
                 recent

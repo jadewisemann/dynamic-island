@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let deduplicator = NotificationDeduplicator()
     private let socketServer = IslandSocketServer()
     private let agents = AgentMonitor()
+    private let aiUsage = AIUsageMonitor()
     private let shelf = ClipboardShelf()
     private var windowController: IslandWindowController?
     private var statusItem: NSStatusItem?
@@ -108,6 +109,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         configureBadges(configStore.config)
 
+        aiUsage.onChange = { [weak self] usage in
+            self?.model.setAIUsage(usage)
+        }
+        model.onCloseAllNotifications = { [weak self] in
+            self?.notificationWatcher.dismissVisibleBanners()
+        }
         notificationWatcher.onNotification = { [weak self] notification in
             self?.receive(notification)
         }
@@ -228,6 +235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         agents.onSessionsChange = { [weak self] sessions in
             self?.model.setAgentSessions(sessions)
+            // A finished or started turn changes the token counts.
+            self?.aiUsage.refresh()
             self?.windowController?.reposition()
         }
         agents.present = { [weak self] n in self?.model.present(notification: n) }
@@ -415,6 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    alertMinutes: config.calendar.alertMinutes.map { Int($0.rounded()) },
                                    includeAllDay: config.calendar.includeAllDay)
         notificationDatabase.configure(enabled: config.notifications.enabled && config.notifications.readDatabase && !isDemo)
+        aiUsage.configure(config.usage, used: config.showsUsage)
         settingsModel?.calendarAccess = calendarProvider.access
         settingsModel?.notificationDatabaseStatus = notificationDatabase.status
     }
