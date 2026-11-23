@@ -9,7 +9,7 @@
 
 OmniWM 내장 워크스페이스 바와 달리 macOS의 "동작 줄이기"나 OmniWM 애니메이션 설정과 상관없이 동작합니다.
 
-- **⌥H를 누르면** 아일랜드가 펼쳐지면서 검색창이 열립니다. 바로 입력하면 앱, OmniWM에 열려 있는 창, 계산 결과가 아일랜드 아래로 붙습니다. `c`, `w`, `s` 다음에 스페이스를 누르면 클립보드 관리자, 창 관리자, 설정 관리자로 바로 들어갑니다. 자세한 내용은 아래 [런처](#런처)를 보세요.
+- **⌥H를 누르면** 아일랜드가 펼쳐지면서 검색창이 열립니다. 바로 입력하면 앱, OmniWM에 열려 있는 창, 계산 결과가 아일랜드 아래로 붙습니다. `c`, `w`, `s` 다음에 스페이스를 누르면 클립보드 관리자, 창 관리자, 설정 관리자로 바로 들어갑니다. 자주 여는 주소는 Quick Links로 저장해 `gh owner/repo`처럼 키워드로 엽니다. 자세한 내용은 아래 [런처](#런처)를 보세요.
 
 ## 요구 사항
 
@@ -187,7 +187,9 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `launcher.webSearch` / `suggestions` / `maxSuggestions` | `true` / `true` / `3` | "Google에서 검색" 줄과 추천 검색어입니다. |
 | `launcher.askClaude` / `askGrok` / `searchX` | `false` | 입력한 내용을 Claude, Grok에 묻거나 X에서 찾는 줄을 붙입니다. |
 | `launcher.width` | `560` | 런처가 열렸을 때 아일랜드의 너비입니다. |
-| `launcher.prefixes` | `{ "clipboard": "c", "windows": "w", "settings": "s", "files": "f", "apps": "" }` | 내장 앱의 트리거 접두어입니다. `""`이면 접두어를 쓰지 않습니다. |
+| `launcher.prefixes` | `{ "clipboard": "c", "windows": "w", "settings": "s", "files": "f", "apps": "", "quicklinks": "" }` | 내장 앱의 트리거 접두어입니다. `""`이면 접두어를 쓰지 않습니다. |
+| `launcher.quickLinks` | GitHub·YouTube·다운로드 폴더 예시 3개 | Quick Links 목록입니다. 항목마다 `name`, `link`, `keyword`(선택), `app`(선택)을 적습니다. 자세한 내용은 아래 [Quick Links](#quick-links)를 보세요. |
+| `launcher.searchQuickLinks` | `true` | Quick Links를 기본 검색에 섞어서 보여 줍니다. |
 | `launcher.searchClipboard` | `false` | 복사 기록도 기본 검색에 섞어서 보여 줍니다. |
 | `launcher.learnFromPicks` | `true` | 고른 결과를 학습해서, 자주 고른 항목과 같은 검색어로 골랐던 항목을 위로 올립니다. |
 | `shelf.enabled` / `maxItems` | `true` / `30` | 클립보드 관리자가 복사 기록을 남길지와 기억할 개수입니다. |
@@ -236,8 +238,27 @@ Option을 누르고 있으면 평소처럼 아일랜드가 내려오고, 이어�
 | `s` | 설정 관리자 | OmniIsland 설정과 시스템 설정 패널만 보여 줍니다. |
 | `f` | 파일 검색 | 홈 폴더의 파일을 더 많이(최대 40개) 찾습니다. |
 | (없음) | 앱 | 설치된 앱 전체를 자주 연 순서로 보여 줍니다. 접두어를 정하면 쓸 수 있습니다. |
+| (없음) | Quick Links | 저장한 링크 전체를 보여 줍니다. 접두어를 정하면 쓸 수 있습니다. |
 
 기본 검색에서 `c`처럼 접두어만 입력하거나 "클립보드", "창 관리자"처럼 이름을 입력하면 그 내장 앱으로 들어가는 줄도 나옵니다. 복사 기록은 기본 검색에 섞이지 않으며, 설정에서 "클립보드 기록"을 켜면 함께 검색됩니다. 비밀번호 관리자에서 복사한 것은 기록하지 않습니다.
+
+### Quick Links
+
+Raycast의 Quick Links처럼, 자주 여는 주소나 폴더를 이름과 키워드로 저장해 두고 런처에서 엽니다. 설정 → 런처 → Quick Links에서 추가, 편집, 삭제합니다.
+
+- **링크**: `https://…` 웹 주소, `github.com/x`처럼 스킴이 없는 주소(https로 엽니다), `obsidian://`, `mailto:` 같은 URL, `~/Downloads` 같은 파일·폴더 경로를 적을 수 있습니다.
+- **`{query}`**: 링크에 `{query}`를 넣으면 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드 `gh`, 링크 `https://github.com/{query}`로 저장하면 `gh jadewisemann/dynamic-island`를 입력하고 Return을 눌러 저장소를 엽니다. 웹 주소에서는 입력한 내용을 URL 인코딩하되 `/`는 그대로 둡니다.
+- **키워드만 입력**: `gh`만 입력하면 그 링크가 맨 위에 나오고, Return이나 Tab을 누르면 검색창이 `gh `로 바뀌어 바로 이어서 입력할 수 있습니다.
+- **열 앱**: 앱 이름(`Safari`), 번들 ID(`com.google.Chrome`), `.app` 경로를 적으면 기본 앱 대신 그 앱으로 엽니다.
+- ⌘Return은 열지 않고 완성된 주소만 복사합니다. 내장 앱의 접두어(`c`, `w` 등)와 같은 키워드는 접두어가 먼저 적용되니 다른 키워드를 쓰세요.
+
+```json5
+"quickLinks": [
+  { "name": "GitHub 저장소", "link": "https://github.com/{query}", "keyword": "gh" },
+  { "name": "다운로드 폴더", "link": "~/Downloads", "keyword": "dl" },
+  { "name": "사내 위키", "link": "wiki.example.com/search?q={query}", "keyword": "wk", "app": "Safari" },
+],
+```
 
 | 키 | 동작 |
 |---|---|
