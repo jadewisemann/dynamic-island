@@ -1319,31 +1319,103 @@ private struct QuickLinkSettings: View {
     /// The link being edited: its index, or -1 for a new one.
     @State private var editing: Int?
     @State private var form = QuickLink()
+    /// Keyword a new link is added under (its editor shows below that row),
+    /// or nil to add at the end.
+    @State private var addingUnder: String?
 
     private var links: [QuickLink] { model.draft.launcher.quickLinks }
 
-    var body: some View {
-        Section {
-            Toggle("기본 검색에 포함하기", isOn: $model.draft.launcher.searchQuickLinks)
-            ForEach(Array(links.enumerated()), id: \.offset) { index, link in
-                if editing == index {
-                    editor
-                } else {
-                    row(index, link)
+    /// One line of the list: a link, or a keyword level that has links under
+    /// it but no link of its own ("gh bb" for "gh bb stg").
+    private struct Entry: Identifiable {
+        enum Kind { case link(Int), group }
+        let kind: Kind
+        let path: [String]
+        var id: String {
+            switch kind {
+            case .link(let i): return "link:\(i)"
+            case .group: return "group:" + path.joined(separator: " ")
+            }
+        }
+        var depth: Int { max(0, path.count - 1) }
+    }
+
+    /// Links with keywords as a tree ordered by keyword, then the links
+    /// without one in the order they were added.
+    private var entries: [Entry] {
+        var tree: [Entry] = []
+        var keyed = Set<String>()
+        for (i, link) in links.enumerated() {
+            let path = QuickLink.words(link.keyword).text.split(separator: " ").map(String.init)
+            guard !path.isEmpty else { continue }
+            tree.append(Entry(kind: .link(i), path: path))
+            keyed.insert(path.joined(separator: " ").lowercased())
+        }
+        var groups = Set<String>()
+        for entry in tree {
+            for n in stride(from: 1, to: entry.path.count, by: 1) {
+                let prefix = Array(entry.path.prefix(n))
+                let key = prefix.joined(separator: " ").lowercased()
+                if !keyed.contains(key) && groups.insert(key).inserted {
+                    tree.append(Entry(kind: .group, path: prefix))
                 }
             }
-            if editing == -1 {
+        }
+        tree.sort { a, b in
+            for (x, y) in zip(a.path, b.path) where x.lowercased() != y.lowercased() {
+                return x.localizedStandardCompare(y) == .orderedAscending
+            }
+            if a.path.count != b.path.count { return a.path.count < b.path.count }
+            // Same keyword twice: groups first, then the order they were added.
+            switch (a.kind, b.kind) {
+            case (.group, _): return true
+            case (_, .group): return false
+            case (.link(let i), .link(let j)): return i < j
+            }
+        }
+        let loose = links.indices.filter { QuickLink.words(links[$0].keyword).text.isEmpty }
+            .map { Entry(kind: .link($0), path: []) }
+        return tree + loose
+    }
+
+    var body: some View {
+        let list = entries
+        // The row a new child link's editor goes under: the first with that keyword.
+        let anchor = addingUnder.flatMap { under in
+            list.first { $0.path.joined(separator: " ").lowercased() == under.lowercased() }?.id
+        }
+        Section {
+            Toggle("기본 검색에 포함하기", isOn: $model.draft.launcher.searchQuickLinks)
+            ForEach(list) { entry in
+                Group {
+                    switch entry.kind {
+                    case .link(let index):
+                        if editing == index {
+                            editor
+                        } else {
+                            row(index, links[index], path: entry.path)
+                        }
+                    case .group:
+                        groupRow(entry.path)
+                    }
+                }
+                .padding(.leading, CGFloat(entry.depth) * 18)
+                if editing == -1, anchor == entry.id {
+                    editor
+                        .padding(.leading, CGFloat(entry.path.count) * 18)
+                }
+            }
+            if editing == -1 && anchor == nil {
                 editor
             } else {
                 Button {
-                    form = QuickLink()
-                    editing = -1
+                    startAdding(under: nil)
                 } label: {
                     Label("링크 추가", systemImage: "plus")
                 }
                 .disabled(editing != nil)
             }
-            Text("런처에서 이름이나 키워드로 찾아 Return을 누르면 링크를 엽니다. 링크에 {query}를 넣으면, 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드가 gh이고 링크가 https://github.com/{query}이면, gh jadewisemann/dynamic-island를 입력해서 그 저장소를 엽니다. 아무것도 입력하지 않고 Return을 누르면 {query} 앞부분(https://github.com/)을 엽니다. 키워드는 gh bb stg처럼 여러 단어로 적어 계층을 만들 수 있습니다. g만 입력해도 g로 시작하는 키워드가 위에 힌트로 나오고, gh 다음에 스페이스를 누르면 gh 아래의 링크가 모두 나옵니다. Tab을 누르면 키워드를 다음 단어까지 완성합니다. 링크에는 웹 주소뿐 아니라 obsidian://, mailto: 같은 URL이나 ~/Downloads 같은 파일·폴더 경로도 적을 수 있습니다. ⌘Return은 열지 않고 주소만 복사합니다.")
+            Text("키워드를 gh bb stg처럼 여러 단어로 적으면 단어마다 한 단계씩 계층이 생기고, 이 목록에도 키워드 순서대로 들여쓰기해서 보여 줍니다. 줄 오른쪽의 ＋ 버튼을 누르면 그 키워드 아래에 하위 링크를 추가합니다. 런처에서 이름이나 키워드로 찾아 Return을 누르면 링크를 엽니다. 링크에 {query}를 넣으면, 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드가 gh이고 링크가 https://github.com/{query}이면, gh jadewisemann/dynamic-island를 입력해서 그 저장소를 엽니다. 아무것도 입력하지 않고 Return을 누르면 {query} 앞부분(https://github.com/)을 엽니다. g만 입력해도 g로 시작하는 키워드가 위에 힌트로 나오고, gh 다음에 스페이스를 누르면 gh 아래의 링크가 모두 나옵니다. Tab을 누르면 키워드를 다음 단어까지 완성합니다. 링크에는 웹 주소뿐 아니라 obsidian://, mailto: 같은 URL이나 ~/Downloads 같은 파일·폴더 경로도 적을 수 있습니다. ⌘Return은 열지 않고 주소만 복사합니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
@@ -1351,7 +1423,51 @@ private struct QuickLinkSettings: View {
         }
     }
 
-    private func row(_ index: Int, _ link: QuickLink) -> some View {
+    private func startAdding(under path: [String]?) {
+        form = QuickLink()
+        if let path, !path.isEmpty {
+            form.keyword = path.joined(separator: " ") + " "
+            addingUnder = path.joined(separator: " ")
+        } else {
+            addingUnder = nil
+        }
+        editing = -1
+    }
+
+    private func addChildButton(_ path: [String]) -> some View {
+        Button {
+            startAdding(under: path)
+        } label: {
+            Image(systemName: "plus.circle")
+        }
+        .buttonStyle(.borderless)
+        .disabled(editing != nil)
+        .help("\(path.joined(separator: " ")) 아래에 하위 링크 추가")
+    }
+
+    private func keywordBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.monospaced())
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+    }
+
+    /// A keyword level without a link of its own.
+    private func groupRow(_ path: [String]) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text(path.last ?? "")
+                .foregroundStyle(.secondary)
+            Spacer()
+            keywordBadge(path.joined(separator: " "))
+            addChildButton(path)
+        }
+    }
+
+    private func row(_ index: Int, _ link: QuickLink, path: [String]) -> some View {
         HStack(spacing: 10) {
             Image(systemName: link.needsInput ? "magnifyingglass" : link.isFile ? "folder" : "link")
                 .foregroundStyle(.secondary)
@@ -1366,14 +1482,14 @@ private struct QuickLinkSettings: View {
             }
             Spacer()
             if !link.keyword.isEmpty {
-                Text(link.keyword)
-                    .font(.caption.monospaced())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                keywordBadge(link.keyword)
+            }
+            if !path.isEmpty {
+                addChildButton(path)
             }
             Button("편집") {
                 form = link
+                addingUnder = nil
                 editing = index
             }
             .disabled(editing != nil)
@@ -1420,8 +1536,11 @@ private struct QuickLinkSettings: View {
             }
             HStack {
                 Spacer()
-                Button("취소") { editing = nil }
-                    .keyboardShortcut(.cancelAction)
+                Button("취소") {
+                    editing = nil
+                    addingUnder = nil
+                }
+                .keyboardShortcut(.cancelAction)
                 Button("저장") { save() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!trimmed.isValid)
@@ -1439,6 +1558,7 @@ private struct QuickLinkSettings: View {
             model.draft.launcher.quickLinks.append(link)
         }
         editing = nil
+        addingUnder = nil
     }
 }
 
