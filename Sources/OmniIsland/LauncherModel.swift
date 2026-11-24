@@ -43,6 +43,10 @@ struct LauncherItem: Identifiable, Equatable {
     var score: Int
     /// Heading drawn above the first row of a group ("최근에 연 앱").
     var section: String? = nil
+    /// A tag drawn at the right (a Quick Link's keyword), with its first
+    /// `badgeHits` characters (what was typed) highlighted.
+    var badge: String? = nil
+    var badgeHits = 0
     var group: Group = .local
     /// The plugin that made the row and runs it.
     var plugin: String = ""
@@ -334,7 +338,6 @@ final class LauncherModel: ObservableObject {
             if let target = plugin(id: id) { enter(target) }
             return
         }
-        if fillQuickLink(first) { return }
         guard let target = plugin(id: first.plugin), target.canActivate(first) else { return }
         if config.learnFromPicks {
             for item in items where item.group == .local { picks.record(item.id, query: trimmedQuery) }
@@ -343,13 +346,11 @@ final class LauncherModel: ObservableObject {
         target.activate(items, alternate: alternate)
     }
 
-    /// A link that asks for text and has none: types its keyword (or name)
-    /// and a space, so what comes next fills its `{query}`.
+    /// Tab on a Quick Link: completes its keyword to the end of the next
+    /// word ("g" → "gh ", "gh " → "gh bb "), so the links under it show.
     private func fillQuickLink(_ item: LauncherItem) -> Bool {
-        guard case .quickLink(let link, let argument) = item.kind, link.needsInput,
-              (argument ?? "").isEmpty else { return false }
-        let text = QuickLinksPlugin.trigger(of: link) + " "
-        guard query != text else { return true }
+        guard case .quickLink(let link, _) = item.kind,
+              let text = QuickLinksPlugin.completion(for: link, typed: query), text != query else { return false }
         query = text
         selection = 0
         querySerial &+= 1

@@ -43,9 +43,10 @@ struct QuickLink: Equatable {
 
     /// The address to open, with `{query}` replaced by `argument`.
     func url(argument: String? = nil) -> URL? {
-        let template = link.trimmingCharacters(in: .whitespaces)
+        var template = link.trimmingCharacters(in: .whitespaces)
         guard !template.isEmpty else { return nil }
         let arg = (argument ?? "").trimmingCharacters(in: .whitespaces)
+        if arg.isEmpty && needsInput { template = Self.withoutQuery(template) }
         if isFile {
             let text = Self.fill(template, with: arg)
             if text.lowercased().hasPrefix("file://") { return URL(string: text) }
@@ -57,6 +58,31 @@ struct QuickLink: Equatable {
             text = (text.lowercased().hasPrefix("localhost") || text.hasPrefix("127.") ? "http://" : "https://") + text
         }
         return URL(string: text)
+    }
+
+    /// What to open when a `{query}` link gets no text: the part before the
+    /// placeholder ("https://github.com/{query}" → https://github.com/), or
+    /// the site itself when the placeholder is in the query string
+    /// ("youtube.com/results?search_query={query}" → youtube.com).
+    static func withoutQuery(_ template: String) -> String {
+        guard let r = template.range(of: placeholder, options: .caseInsensitive) else { return template }
+        let before = template[..<r.lowerBound]
+        guard let mark = before.firstIndex(where: { $0 == "?" || $0 == "#" }) else { return String(before) }
+        let path = before[..<mark]
+        // Keep the scheme and host, drop the path.
+        if let scheme = path.range(of: "://") {
+            let rest = path[scheme.upperBound...]
+            let host = rest.firstIndex(of: "/").map { rest[..<$0] } ?? rest
+            return String(path[..<scheme.upperBound]) + host + "/"
+        }
+        return String(path.split(separator: "/").first ?? Substring(path))
+    }
+
+    /// Text split into words and joined with single spaces ("gh  bb " → "gh bb"),
+    /// and whether it ended with a space.
+    static func words(_ text: String) -> (text: String, trailingSpace: Bool) {
+        let parts = text.split(whereSeparator: \.isWhitespace)
+        return (parts.joined(separator: " "), !parts.isEmpty && (text.last?.isWhitespace ?? false))
     }
 
     private static func fill(_ template: String, with value: String) -> String {
@@ -122,9 +148,11 @@ struct QuickLink: Equatable {
 
 // MARK: - Plugin
 
-/// Quick Links in the launcher. A link is found by its name or keyword;
-/// "gh owner/repo" fills `{query}` of the link whose keyword is "gh". Return
-/// on a link that asks for text and has none puts "gh " in the field.
+/// Quick Links in the launcher. A link is found by its name or keyword.
+/// Keywords can have several words ("gh bb stg"), so typing "gh " lists
+/// every link under gh, like folders. "gh owner/repo" fills `{query}` of the
+/// link whose keyword is "gh"; Return on it with nothing typed opens the
+/// address without the placeholder. Tab completes the next word.
 @MainActor
 final class QuickLinksPlugin: LauncherPlugin {
     unowned let host: LauncherModel
@@ -135,36 +163,67 @@ final class QuickLinksPlugin: LauncherPlugin {
     let symbol = "link"
     let keywords = ["quicklinks", "quick links", "links", "bookmarks", "링크", "바로가기", "북마크"]
     let hasMode = true
-    let placeholder = "저장한 링크를 이름이나 키워드로 찾습니다 · ⌘Return은 주소 복사"
+    let placeholder = "저장한 링크를 이름이나 키워드로 찾습니다 · Tab 키워드 완성 · ⌘Return 주소 복사"
     var inRoot: Bool { host.config.searchQuickLinks }
+
+    /// Hint rows (keywords that go on from what is typed) at most.
+    private static let maxHints = 6
 
     private var links: [QuickLink] { host.config.quickLinks.filter(\.isValid) }
 
     /// What to type before the text a link asks for: its keyword, or its name.
     static func trigger(of link: QuickLink) -> String {
-        link.keyword.isEmpty ? link.name : link.keyword
+        let keyword = QuickLink.words(link.keyword).text
+        return keyword.isEmpty ? link.name : keyword
+    }
+
+    /// What Tab puts in the field on a link's row: the keyword up to the end
+    /// of its next word ("g" → "gh ", "gh " → "gh bb "), and a space after
+    /// the whole keyword of a link that asks for text. Nil when there is
+    /// nothing more to complete.
+    static func completion(for link: QuickLink, typed raw: String) -> String? {
+        let keyword = QuickLink.words(link.keyword).text
+        let trigger = keyword.isEmpty ? (link.needsInput ? link.name : "") : keyword
+        guard !trigger.isEmpty else { return nil }
+        let typed = QuickLink.words(raw)
+        let key = (typed.trailingSpace ? typed.text + " " : typed.text).lowercased()
+        let lower = trigger.lowercased()
+        if lower == key { return link.needsInput ? trigger + " " : nil }
+        guard lower.hasPrefix(key), trigger.count > key.count else { return nil }
+        let rest = trigger.dropFirst(key.count)
+        if let space = rest.firstIndex(of: " ") { return String(trigger[..<space]) + " " }
+        return trigger + (link.needsInput ? " " : "")
     }
 
     private func key(_ index: Int, _ link: QuickLink) -> String { "\(index):\(link.name)" }
 
     private func subtitle(_ link: QuickLink, argument: String?) -> String {
         if link.needsInput && (argument ?? "").isEmpty {
-            return argument == nil ? "\(Self.trigger(of: link)) 다음에 스페이스를 누르고 입력합니다"
-                : "열 내용을 입력합니다 (링크의 {query} 자리에 들어갑니다)"
+            let base = link.url(argument: nil).map(Self.display) ?? link.link
+            return argument == nil
+                ? "\(Self.trigger(of: link)) 다음에 스페이스를 누르고 입력합니다 · Return은 \(base) 열기"
+                : "열 내용을 입력합니다 · Return은 \(base) 열기"
         }
-        let address = link.url(argument: argument).map { url in
-            url.isFileURL ? (url.path as NSString).abbreviatingWithTildeInPath : url.absoluteString
-        } ?? link.link
-        return link.keyword.isEmpty ? address : "\(link.keyword) · \(address)"
+        return link.url(argument: argument).map(Self.display) ?? link.link
+    }
+
+    private static func display(_ url: URL) -> String {
+        url.isFileURL ? (url.path as NSString).abbreviatingWithTildeInPath : url.absoluteString
     }
 
     private func linkRow(_ index: Int, _ link: QuickLink, argument: String? = nil, hits: [Int] = [],
-                         score: Int = 0, section: String? = nil, group: LauncherItem.Group = .local) -> LauncherItem {
+                         badgeHits: Int = 0, score: Int = 0, group: LauncherItem.Group = .local) -> LauncherItem {
         let filled = argument.map { !$0.isEmpty } ?? false
-        return row(key(index, link) + (filled ? ":arg" : ""), .quickLink(link, argument: argument),
-                   title: filled ? "\(link.name): \(argument ?? "")" : link.name,
-                   subtitle: subtitle(link, argument: argument),
-                   hits: hits, score: score, section: section, group: group)
+        var item = row(key(index, link) + (filled ? ":arg" : ""), .quickLink(link, argument: argument),
+                       title: filled ? "\(link.name): \(argument ?? "")" : link.name,
+                       subtitle: subtitle(link, argument: argument),
+                       hits: hits, score: score, group: group)
+        let keyword = QuickLink.words(link.keyword).text
+        if !keyword.isEmpty {
+            item.badge = keyword
+            item.badgeHits = min(badgeHits, keyword.count)
+        }
+        return item
     }
 
     func search(_ query: String, inMode: Bool) -> [LauncherItem] {
@@ -174,36 +233,55 @@ final class QuickLinksPlugin: LauncherPlugin {
             guard inMode else { return [] }
             return saved.enumerated().map { i, link in linkRow(i, link) }
         }
-        let lower = query.lowercased()
 
-        // "gh owner/repo": the text after a keyword (or a name) fills {query}.
         // The field as typed, so "gh " with its space already counts.
-        let typed = String(host.query.drop(while: \.isWhitespace))
-        let typedLower = typed.lowercased()
-        var filled: [LauncherItem] = []
-        for (i, link) in saved.enumerated() where link.needsInput {
-            let triggers = [link.keyword, link.name].filter { !$0.isEmpty }.map { $0.lowercased() }
-            guard let t = triggers.first(where: { typedLower.hasPrefix($0 + " ") }) else { continue }
-            let argument = String(typed.dropFirst(t.count + 1)).trimmingCharacters(in: .whitespaces)
-            filled.append(linkRow(i, link, argument: argument, score: 10_000, group: .answer))
-        }
-        if !filled.isEmpty { return filled }
+        let typed = QuickLink.words(host.query)
+        let typedLower = typed.text.lowercased()
+        let typedKey = typed.trailingSpace ? typedLower + " " : typedLower
 
-        var items: [LauncherItem] = []
+        var answers: [LauncherItem] = []
+        var hints: [LauncherItem] = []
+        var used = Set<Int>()
         for (i, link) in saved.enumerated() {
-            if !link.keyword.isEmpty && link.keyword.lowercased() == lower {
-                // The keyword typed exactly beats any fuzzy match.
-                items.append(linkRow(i, link, score: 5_000))
+            let keyword = QuickLink.words(link.keyword).text.lowercased()
+            // "gh owner/repo": the text after a keyword (or a name) fills {query}.
+            if link.needsInput,
+               let t = [keyword, link.name.lowercased()].first(where: { !$0.isEmpty && typedKey.hasPrefix($0 + " ") }) {
+                let argument = String(typed.text.dropFirst(t.count)).trimmingCharacters(in: .whitespaces)
+                // With nothing typed yet it leads; with text, links further
+                // down the keyword ("gh bb stg" for "gh b") go first.
+                answers.append(linkRow(i, link, argument: argument, badgeHits: keyword.count,
+                                       score: argument.isEmpty ? 9_500 : 7_000, group: .answer))
+                used.insert(i)
                 continue
             }
-            let nameMatch = FuzzyMatcher.match(query, FuzzyMatcher.Candidate(link.name))
-            let keywordMatch = link.keyword.isEmpty ? nil
-                : FuzzyMatcher.match(query, FuzzyMatcher.Candidate(link.keyword))
-            let score = max(nameMatch?.score ?? -1, keywordMatch?.score ?? -1)
-            guard score >= (inMode ? 0 : 300) else { continue }
-            items.append(linkRow(i, link, hits: nameMatch?.hits ?? [], score: inMode ? score : score - 30))
+            guard !keyword.isEmpty else { continue }
+            if keyword == typedLower && !typed.trailingSpace {
+                answers.append(linkRow(i, link, badgeHits: keyword.count, score: 10_000, group: .answer))
+                used.insert(i)
+            } else if keyword.hasPrefix(typedKey) {
+                // A hint: the keyword goes on from what is typed ("g" → gh, "gh " → gh bb stg).
+                hints.append(linkRow(i, link, badgeHits: typedKey.count,
+                                     score: 8_000 - min(keyword.count - typedKey.count, 900), group: .answer))
+                used.insert(i)
+            }
         }
-        return inMode ? ranked(items) : items
+        let byScore: (LauncherItem, LauncherItem) -> Bool = { a, b in
+            a.score != b.score ? a.score > b.score : a.title.localizedStandardCompare(b.title) == .orderedAscending
+        }
+        hints.sort(by: byScore)
+        var rows = (answers + hints.prefix(Self.maxHints)).sorted(by: byScore)
+        if inMode { rows += hints.dropFirst(Self.maxHints) }
+
+        // The rest by name.
+        var items: [LauncherItem] = []
+        for (i, link) in saved.enumerated() where !used.contains(i) {
+            guard let match = FuzzyMatcher.match(query, FuzzyMatcher.Candidate(link.name)),
+                  match.score >= (inMode ? 0 : 300) else { continue }
+            items.append(linkRow(i, link, hits: match.hits, score: inMode ? match.score : match.score - 30))
+        }
+        rows += inMode ? ranked(items) : items
+        return rows
     }
 
     func activate(_ items: [LauncherItem], alternate: Bool) {
