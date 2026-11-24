@@ -770,6 +770,7 @@ private struct WidgetSettings: View {
         Form {
             Section {
                 wingPicker("왼쪽", selection: $model.draft.widgets.leftWing)
+                wingPicker("가운데", selection: $model.draft.widgets.centerWing)
                 wingPicker("오른쪽", selection: $model.draft.widgets.rightWing)
                 if usesClock {
                     Picker("시계 형식", selection: $model.draft.widgets.clockFormat) {
@@ -779,9 +780,9 @@ private struct WidgetSettings: View {
                     }
                 }
             } header: {
-                Text("노치 양옆")
+                Text("노치 줄")
             } footer: {
-                Text("떠 있는 캡슐 형태에서는 워크스페이스 줄의 양 끝에 표시됩니다.")
+                Text("가운데 위젯은 노치가 없는 화면에서만 보입니다. 떠 있는 캡슐 형태에서는 왼쪽과 오른쪽 위젯이 워크스페이스 줄의 양 끝에 표시됩니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -796,10 +797,11 @@ private struct WidgetSettings: View {
                 PanelSlotEditor(model: model)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
+                Toggle("이벤트 중에도 표시", isOn: $model.draft.widgets.panelsDuringEvents)
             } header: {
                 Text("좌우 위젯 칸")
             } footer: {
-                Text("트리거 키를 눌러 워크스페이스 줄이 나타날 때 아일랜드 양옆에 붙습니다. 칸보다 위젯이 적으면 남는 너비를 나눠 쓰고, 2칸 이상이면 위젯이 넓은 모양으로 바뀝니다.")
+                Text("트리거 키를 눌러 워크스페이스 줄이 나타날 때 아일랜드 양옆에 붙습니다. ‘이벤트 중에도 표시’를 켜면 이동 알림이나 macOS 알림이 펼쳐질 때도 위젯 칸이 그대로 남습니다. 칸보다 위젯이 적으면 남는 너비를 나눠 쓰고, 2칸 이상이면 위젯이 넓은 모양으로 바뀝니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -853,7 +855,7 @@ private struct WidgetSettings: View {
 
     private var usesClock: Bool {
         let w = model.draft.widgets
-        return w.leftWing.lowercased() == "clock" || w.rightWing.lowercased() == "clock"
+        return [w.leftWing, w.centerWing, w.rightWing].contains { $0.lowercased() == "clock" }
             || (w.leftPanel + w.rightPanel).contains("clock")
     }
 

@@ -883,6 +883,19 @@ final class IslandModel: ObservableObject {
     var leftWingWidth: CGFloat { wingWidth(config.widgets.leftWing) }
     var rightWingWidth: CGFloat { wingWidth(config.widgets.rightWing) }
 
+    /// Whether the strip shows a widget in its middle. A hardware notch
+    /// covers the middle, and a floating island has no strip.
+    var showsCenterWing: Bool {
+        !geometry.hasNotch && !isFloating && config.widgets.centerWing.lowercased() != "none"
+            && !config.widgets.centerWing.isEmpty
+    }
+
+    /// Width of the middle of the strip: the notch, or room for the center
+    /// widget when it is wider than the stand-in notch.
+    var stripMiddleWidth: CGFloat {
+        showsCenterWing ? max(geometry.width, wingWidth(config.widgets.centerWing) + 16) : geometry.width
+    }
+
     /// Number of windows on the active workspace (windows widget).
     var activeWindowCount: Int {
         workspaces.first { $0.id == activeWorkspaceKey }?.windowCount ?? 0
@@ -1002,7 +1015,8 @@ final class IslandModel: ObservableObject {
         switch phase {
         case .compact, .dashboard: return true
         // As separate drops the panels can stay beside a taller island.
-        case .expanded, .notification: return usesLiquid && panelsOut
+        case .expanded, .notification:
+            return config.widgets.panelsDuringEvents || (usesLiquid && panelsOut)
         case .hidden, .launcher: return false
         }
     }
@@ -1023,7 +1037,7 @@ final class IslandModel: ObservableObject {
             return CGSize(width: width, height: rowHeight)
         }
         let wings = max(leftWingWidth, rightWingWidth)
-        let width = max(geometry.width + 2 * wings, rowContentWidth + padding, fixedWidth)
+        let width = max(stripMiddleWidth + 2 * wings, rowContentWidth + padding, fixedWidth)
         return CGSize(width: width, height: geometry.height + rowHeight)
     }
 
@@ -1106,8 +1120,8 @@ final class IslandModel: ObservableObject {
         // Room for the offset when only one side has a panel.
         let side = 2 * max(leftPanelSpan, rightPanelSpan)
         let shifted = CGSize(width: centerSize.width + side, height: 0)
-        // Liquid panels can also sit beside the event sizes.
-        let extra = usesLiquid ? side : 0
+        // Panels can also sit beside the event sizes.
+        let extra = usesLiquid || config.widgets.panelsDuringEvents ? side : 0
         let events = [expandedSize, notificationSize].map { CGSize(width: $0.width + extra, height: $0.height) }
         var sizes = events + [compactSize, dashboardSize, shifted]
         if config.launcher.enabled {

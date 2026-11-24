@@ -28,7 +28,7 @@ struct IslandConfig: Equatable {
     /// Some wing, side panel or dashboard item shows AI usage.
     var showsUsage: Bool {
         let w = widgets
-        let names = [w.leftWing, w.rightWing] + w.leftPanel + w.rightPanel + (dashboard.enabled ? dashboard.items : [])
+        let names = [w.leftWing, w.centerWing, w.rightWing] + w.leftPanel + w.rightPanel + (dashboard.enabled ? dashboard.items : [])
         return names.contains { $0.lowercased() == "usage" }
     }
 
@@ -205,6 +205,9 @@ struct IslandConfig: Equatable {
         /// app | workspace | clock | date | windows | nextEvent | notifications | agents | usage | none
         var leftWing = "app"
         var rightWing = "workspace"
+        /// Widget in the middle of the strip. Only visible on screens without
+        /// a notch: on a notched screen the hardware covers the middle.
+        var centerWing = "none"
         /// name | number | both
         var workspaceLabel = "name"
         var eventIcon = true
@@ -220,6 +223,9 @@ struct IslandConfig: Equatable {
         /// Width of each side panel in squares (1–3). More widgets than
         /// squares widen the panel; fewer share the width.
         var panelUnits = 1.0
+        /// Keep the side panels beside the island while it shows an event
+        /// (window move, notification) instead of taking them in.
+        var panelsDuringEvents = true
     }
 
     /// macOS notifications read from Notification Center banners.
@@ -630,6 +636,7 @@ extension IslandConfig {
         if !a.bool("showFocusedApp", true) { c.widgets.leftWing = "none" }
         c.widgets.leftWing = w.string("leftWing", c.widgets.leftWing)
         c.widgets.rightWing = w.string("rightWing", c.widgets.rightWing)
+        c.widgets.centerWing = w.string("centerWing", c.widgets.centerWing)
         c.widgets.workspaceLabel = w.string("workspaceLabel", c.widgets.workspaceLabel)
         c.widgets.eventIcon = w.bool("eventIcon", c.widgets.eventIcon)
         c.widgets.eventSubtitle = w.bool("eventSubtitle", c.widgets.eventSubtitle)
@@ -638,6 +645,7 @@ extension IslandConfig {
         c.widgets.leftPanel = w.strings("leftPanel", c.widgets.leftPanel)
         c.widgets.rightPanel = w.strings("rightPanel", c.widgets.rightPanel)
         c.widgets.panelUnits = w.number("panelUnits", c.widgets.panelUnits)
+        c.widgets.panelsDuringEvents = w.bool("panelsDuringEvents", c.widgets.panelsDuringEvents)
 
         let no = r.sub("notifications")
         c.notifications.enabled = no.bool("enabled", c.notifications.enabled)
@@ -1004,6 +1012,8 @@ extension IslandConfig {
             // app | workspace | clock | date | windows | nextEvent(다음 일정) | notifications(놓친 알림 수) | agents | usage(AI 사용량) | none
             "leftWing": \(q(w.leftWing)),
             "rightWing": \(q(w.rightWing)),
+            // 가운데에 보여 줄 내용입니다 (값은 위와 같습니다). 노치가 없는 화면에서만 보입니다.
+            "centerWing": \(q(w.centerWing)),
             // 워크스페이스 이름: name(OmniWM 표시 이름) | number(번호) | both(번호와 이름)
             "workspaceLabel": \(q(w.workspaceLabel)),
             // 이동 알림에 아이콘, 부제목(창 제목), "출발 → 도착"을 보여 줄지 정합니다.
@@ -1018,6 +1028,8 @@ extension IslandConfig {
             "rightPanel": \(list(w.rightPanel)),
             // 한쪽 칸의 너비를 정사각형 몇 칸으로 할지 정합니다 (1~3).
             "panelUnits": \(n(w.panelUnits)),
+            // 이동 알림이나 macOS 알림이 펼쳐질 때도 좌우 위젯 칸을 계속 보여 줍니다.
+            "panelsDuringEvents": \(b(w.panelsDuringEvents)),
           },
 
           "notifications": {

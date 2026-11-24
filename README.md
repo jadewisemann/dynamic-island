@@ -162,8 +162,10 @@ OmniWMClient ── WMStateTracker ──(스냅숏 비교로 이동 감지)─�
 | `layout.rowAlignment` / `contentPadding` | `"center"` / `20` | 워크스페이스 줄 정렬(`center`, `leading`, `spread`)과 안쪽 여백입니다. |
 | `layout.eventPlacement` | `"below"` | 이동 알림을 워크스페이스 줄 아래(`below`), 위(`above`), 또는 줄 대신(`replace`) 보여 줍니다. |
 | `widgets.leftWing` / `rightWing` | `"app"` / `"workspace"` | 노치 양옆에 보여 줄 내용입니다. `app`, `workspace`, `clock`, `date`, `windows`, `nextEvent`(다음 일정), `notifications`(놓친 알림 수), `agents`(코딩 에이전트), `usage`(AI 사용량), `none` 중 하나입니다. |
+| `widgets.centerWing` | `"none"` | 노치 줄 가운데에 보여 줄 내용입니다. 값은 `leftWing`과 같습니다. 노치가 있는 화면에서는 가운데가 하드웨어 노치에 가려지므로, 노치가 없는 화면의 붙어 있는 형태에서만 보입니다. |
 | `widgets.leftPanel` / `rightPanel` | `["clock"]` / `["calendar"]` | 워크스페이스 줄이 보일 때 아일랜드 양옆에 붙는 정사각형 위젯 칸입니다. `clock`, `calendar`, `nextEvent`, `events`, `notifications`를 순서대로 적고, 비우면 그쪽 칸이 없습니다. |
 | `widgets.panelUnits` | `1` | 한쪽 칸의 너비를 정사각형 1~3칸으로 정합니다. 2칸 이상이면 위젯이 넓은 모양(큰 시계, 2주 달력, 일정 목록)으로 바뀝니다. |
+| `widgets.panelsDuringEvents` | `true` | 이동 알림이나 macOS 알림이 펼쳐질 때도 좌우 위젯 칸을 계속 보여 줍니다. 끄면 리퀴드 효과가 켜져 있고 워크스페이스 줄과 함께 위젯 칸이 나와 있던 경우에만 남습니다. |
 | `widgets.workspaceLabel` | `"name"` | 워크스페이스를 OmniWM 표시 이름(`name`), 번호(`number`), 번호와 이름(`both`)으로 보여 줍니다. |
 | `widgets.eventIcon` / `eventSubtitle` / `eventFromTo` | `true` | 이동 알림 카드의 아이콘, 부제목, "출발 → 도착" 표시를 켜고 끕니다. |
 | `widgets.clockFormat` | `"24h"` | `24h`, `12h`, `24hSeconds` 중 하나입니다. |
