@@ -251,18 +251,27 @@ struct IslandView: View {
         }
     }
 
-    /// Row at notch height with a widget on each wing. The middle is covered
-    /// by the hardware notch.
+    /// Row at notch height with a widget on each wing. On a notched screen
+    /// the hardware covers the middle; elsewhere it can hold a third widget.
     private var topStrip: some View {
-        let wingSpace = max(0, (model.centerWidth - model.geometry.width) / 2 - 20)
+        let middle = model.stripMiddleWidth
+        let wingSpace = max(0, (model.centerWidth - middle) / 2 - 20)
         return HStack(spacing: 6) {
             WingView(model: model, widget: model.config.widgets.leftWing)
                 .frame(maxWidth: wingSpace, alignment: .leading)
-            Spacer(minLength: model.geometry.width)
+            Spacer(minLength: middle)
             WingView(model: model, widget: model.config.widgets.rightWing)
                 .frame(maxWidth: wingSpace, alignment: .trailing)
         }
         .padding(.horizontal, 14)
+        // Centered on the island, whatever the wings beside it need.
+        .overlay {
+            if model.showsCenterWing {
+                WingView(model: model, widget: model.config.widgets.centerWing)
+                    .frame(maxWidth: middle - 8)
+                    .transition(fade)
+            }
+        }
     }
 }
 
