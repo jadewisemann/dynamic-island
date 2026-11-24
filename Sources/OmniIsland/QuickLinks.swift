@@ -195,6 +195,21 @@ final class QuickLinksPlugin: LauncherPlugin {
         return trigger + (link.needsInput ? " " : "")
     }
 
+    /// The keyword word that ends `path` as written in the link (for the
+    /// pill), when `path` is a level with links under it or a `{query}`
+    /// link ("gh" for "gh bb stg" or "gh {query}"). Nil otherwise.
+    func levelWord(path: [String]) -> String? {
+        guard !path.isEmpty else { return nil }
+        let lower = path.map { $0.lowercased() }
+        for link in links {
+            let words = QuickLink.words(link.keyword).text.split(separator: " ").map(String.init)
+            guard words.count >= lower.count,
+                  zip(words, lower).allSatisfy({ $0.lowercased() == $1 }) else { continue }
+            if words.count > lower.count || link.needsInput { return words[lower.count - 1] }
+        }
+        return nil
+    }
+
     private func key(_ index: Int, _ link: QuickLink) -> String { "\(index):\(link.name)" }
 
     private func subtitle(_ link: QuickLink, argument: String?) -> String {
@@ -229,13 +244,14 @@ final class QuickLinksPlugin: LauncherPlugin {
     func search(_ query: String, inMode: Bool) -> [LauncherItem] {
         let saved = links
         guard !saved.isEmpty else { return [] }
-        if query.isEmpty {
+        let inPills = !host.linkPath.isEmpty
+        if query.isEmpty && !inPills {
             guard inMode else { return [] }
             return saved.enumerated().map { i, link in linkRow(i, link) }
         }
 
         // The field as typed, so "gh " with its space already counts.
-        let typed = QuickLink.words(host.query)
+        let typed = QuickLink.words(host.linkTyped)
         let typedLower = typed.text.lowercased()
         let typedKey = typed.trailingSpace ? typedLower + " " : typedLower
 
@@ -259,6 +275,10 @@ final class QuickLinksPlugin: LauncherPlugin {
             if keyword == typedLower && !typed.trailingSpace {
                 answers.append(linkRow(i, link, badgeHits: keyword.count, score: 10_000, group: .answer))
                 used.insert(i)
+            } else if inPills && host.query.isEmpty && keyword == typedLower {
+                // The pill's own link ("gh" itself), under the links below it.
+                answers.append(linkRow(i, link, badgeHits: keyword.count, score: 6_000, group: .answer))
+                used.insert(i)
             } else if keyword.hasPrefix(typedKey) {
                 // A hint: the keyword goes on from what is typed ("g" → gh, "gh " → gh bb stg).
                 hints.append(linkRow(i, link, badgeHits: typedKey.count,
@@ -270,6 +290,7 @@ final class QuickLinksPlugin: LauncherPlugin {
             a.score != b.score ? a.score > b.score : a.title.localizedStandardCompare(b.title) == .orderedAscending
         }
         hints.sort(by: byScore)
+        if inPills { return (answers + hints).sorted(by: byScore) }
         var rows = (answers + hints.prefix(Self.maxHints)).sorted(by: byScore)
         if inMode { rows += hints.dropFirst(Self.maxHints) }
 

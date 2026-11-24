@@ -94,6 +94,23 @@ struct LauncherView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(palette.secondary)
             }
+            if !launcher.linkPath.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(Array(launcher.linkPath.enumerated()), id: \.offset) { _, word in
+                        Text(word)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .lineLimit(1)
+                            .foregroundStyle(palette.text)
+                            .padding(.horizontal, 7)
+                            .frame(height: 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(palette.accent.opacity(0.28))
+                            )
+                    }
+                }
+                .fixedSize()
+            }
             ZStack(alignment: .leading) {
                 if launcher.query.isEmpty {
                     Text(launcher.placeholder)
@@ -344,8 +361,8 @@ struct LauncherField: NSViewRepresentable {
             case #selector(NSResponder.moveDownAndModifySelection(_:)):
                 return launcher.extend(1)
             case #selector(NSResponder.deleteBackward(_:)):
-                // ⌫ on an empty field leaves the built-in app.
-                guard let view, view.string.isEmpty, !view.hasMarkedText(), launcher.leaveMode() else { return false }
+                // ⌫ on an empty field takes off a Quick Link pill, or leaves the built-in app.
+                guard let view, view.string.isEmpty, !view.hasMarkedText(), launcher.backspaceOnEmpty() else { return false }
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertLineBreak(_:)):
                 launcher.activate()
             case #selector(NSResponder.cancelOperation(_:)), #selector(NSTextView.complete(_:)):

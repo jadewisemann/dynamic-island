@@ -83,6 +83,9 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var modeId: String?
     /// Rows picked for one action, in the order they were picked.
     @Published private(set) var marked: [LauncherItem] = []
+    /// Quick Link keyword words already typed and turned into pills ("gh "
+    /// → [gh]); the field holds only what comes after them.
+    @Published private(set) var linkPath: [String] = []
 
     let apps = AppIndex()
     /// What was picked after typing what; lifts those rows next time.
@@ -161,7 +164,7 @@ final class LauncherModel: ObservableObject {
 
     /// "c foo" at the top level → the clipboard manager, searching "foo".
     private func modeTrigger(_ text: String) -> (LauncherPlugin, String)? {
-        guard modeId == nil else { return nil }
+        guard modeId == nil, linkPath.isEmpty else { return nil }
         let lower = text.lowercased()
         for (plugin, prefix) in prefixed {
             for form in Self.forms(of: prefix) where lower.hasPrefix(form + " ") {
@@ -175,6 +178,7 @@ final class LauncherModel: ObservableObject {
         guard plugin.hasMode else { return }
         modeId = plugin.id
         marked = []
+        linkPath = []
         query = text
         selection = 0
         querySerial &+= 1
@@ -187,6 +191,7 @@ final class LauncherModel: ObservableObject {
         guard modeId != nil else { return false }
         modeId = nil
         marked = []
+        linkPath = []
         query = ""
         selection = 0
         querySerial &+= 1
@@ -196,6 +201,7 @@ final class LauncherModel: ObservableObject {
 
     /// Placeholder of the search field.
     var placeholder: String {
+        if !linkPath.isEmpty { return "하위 링크를 고르거나 이어서 입력합니다 · ⌫ 한 단계 위로" }
         if let mode { return mode.placeholder }
         let keys = prefixed.map { $0.prefix }
         guard !keys.isEmpty else { return "앱, 창, 파일, 설정을 검색하거나 웹에서 찾습니다" }
@@ -209,6 +215,7 @@ final class LauncherModel: ObservableObject {
         plugins.forEach { $0.reset() }
         modeId = nil
         marked = []
+        linkPath = []
         query = ""
         selection = 0
         querySerial &+= 1
@@ -220,6 +227,10 @@ final class LauncherModel: ObservableObject {
         guard cleaned != query else { return }
         if let trigger = modeTrigger(cleaned) {
             enter(trigger.0, query: trigger.1)
+            return
+        }
+        // "gh " → gh becomes a pill and the field starts over for what is under it.
+        if cleaned.last?.isWhitespace == true, applyLinkPath((linkPath + [cleaned]).joined(separator: " "), force: false) {
             return
         }
         query = cleaned
@@ -237,6 +248,10 @@ final class LauncherModel: ObservableObject {
             query = ""
             selection = 0
             querySerial &+= 1
+            refresh()
+        } else if !linkPath.isEmpty {
+            linkPath = []
+            selection = 0
             refresh()
         } else if !leaveMode() {
             onClose?()
@@ -262,7 +277,7 @@ final class LauncherModel: ObservableObject {
     /// →: takes the top result's name (or Google's first completion) when
     /// it starts with the query.
     func complete() -> Bool {
-        guard !query.isEmpty, modeId == nil else { return false }
+        guard !query.isEmpty, modeId == nil, linkPath.isEmpty else { return false }
         let lower = query.lowercased()
         let candidates = results.prefix(1).filter { $0.group != .answer }.map(\.title)
             + (web?.completions(for: trimmedQuery).prefix(1) ?? [])
@@ -347,16 +362,60 @@ final class LauncherModel: ObservableObject {
     }
 
     /// Tab on a Quick Link: completes its keyword to the end of the next
-    /// word ("g" → "gh ", "gh " → "gh bb "), so the links under it show.
+    /// word ("g" → gh, "gh" → bb), and every finished word becomes a pill.
     private func fillQuickLink(_ item: LauncherItem) -> Bool {
         guard case .quickLink(let link, _) = item.kind,
-              let text = QuickLinksPlugin.completion(for: link, typed: query), text != query else { return false }
-        query = text
+              let text = QuickLinksPlugin.completion(for: link, typed: linkTyped),
+              text != linkTyped else { return false }
+        return applyLinkPath(text, force: true)
+    }
+
+    // MARK: - Quick Link pills
+
+    private var quickLinks: QuickLinksPlugin? {
+        plugins.lazy.compactMap { $0 as? QuickLinksPlugin }.first
+    }
+
+    /// The pills and the field together, as if typed in one line ("gh bb s").
+    var linkTyped: String {
+        linkPath.isEmpty ? query : (linkPath + [query]).joined(separator: " ")
+    }
+
+    /// Splits `text` into pills (keyword words with links under them, each
+    /// followed by a space) and what stays in the field. Without `force` it
+    /// only acts when that adds a pill.
+    @discardableResult
+    private func applyLinkPath(_ text: String, force: Bool) -> Bool {
+        guard let links = quickLinks, modeId == nil ? links.inRoot : modeId == links.id else { return false }
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        let trailing = text.last?.isWhitespace ?? false
+        var path: [String] = []
+        for (n, word) in words.enumerated() {
+            if n == words.count - 1 && !trailing { break }
+            guard let canonical = links.levelWord(path: path + [word]) else { break }
+            path.append(canonical)
+        }
+        let leftover = words.dropFirst(path.count)
+        let rest = leftover.joined(separator: " ") + (trailing && !leftover.isEmpty ? " " : "")
+        guard force || path.count > linkPath.count else { return false }
+        linkPath = path
+        query = rest
         selection = 0
         querySerial &+= 1
         refresh()
         scheduleAsync()
         return true
+    }
+
+    /// ⌫ on an empty field: takes off the last pill, else leaves the mode.
+    func backspaceOnEmpty() -> Bool {
+        if !linkPath.isEmpty {
+            linkPath.removeLast()
+            selection = 0
+            refresh()
+            return true
+        }
+        return leaveMode()
     }
 
     /// ⌘⌫: removes the selected row where its plugin allows it.
@@ -391,7 +450,7 @@ final class LauncherModel: ObservableObject {
     }
 
     private func ask(_ q: String, epoch asked: Int) {
-        guard asked == epoch else { return }
+        guard asked == epoch, linkPath.isEmpty else { return }
         let inMode = mode != nil
         let targets = mode.map { [$0] } ?? plugins.filter { $0.inRoot }
         for plugin in targets {
@@ -415,6 +474,8 @@ final class LauncherModel: ObservableObject {
     }
 
     private func search(_ q: String) -> [LauncherItem] {
+        // Inside Quick Link pills only the links under them show.
+        if !linkPath.isEmpty, let links = quickLinks { return Array(links.search(q, inMode: true).prefix(300)) }
         if let mode { return Array(mode.search(q, inMode: true).prefix(300)) }
 
         let roots = plugins.filter { $0.inRoot }

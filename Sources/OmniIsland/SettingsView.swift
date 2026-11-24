@@ -1415,7 +1415,7 @@ private struct QuickLinkSettings: View {
                 }
                 .disabled(editing != nil)
             }
-            Text("키워드를 gh bb stg처럼 여러 단어로 적으면 단어마다 한 단계씩 계층이 생기고, 이 목록에도 키워드 순서대로 들여쓰기해서 보여 줍니다. 줄 오른쪽의 ＋ 버튼을 누르면 그 키워드 아래에 하위 링크를 추가합니다. 런처에서 이름이나 키워드로 찾아 Return을 누르면 링크를 엽니다. 링크에 {query}를 넣으면, 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드가 gh이고 링크가 https://github.com/{query}이면, gh jadewisemann/dynamic-island를 입력해서 그 저장소를 엽니다. 아무것도 입력하지 않고 Return을 누르면 {query} 앞부분(https://github.com/)을 엽니다. g만 입력해도 g로 시작하는 키워드가 위에 힌트로 나오고, gh 다음에 스페이스를 누르면 gh 아래의 링크가 모두 나옵니다. Tab을 누르면 키워드를 다음 단어까지 완성합니다. 링크에는 웹 주소뿐 아니라 obsidian://, mailto: 같은 URL이나 ~/Downloads 같은 파일·폴더 경로도 적을 수 있습니다. ⌘Return은 열지 않고 주소만 복사합니다.")
+            Text("키워드를 gh bb stg처럼 여러 단어로 적으면 단어마다 한 단계씩 계층이 생기고, 이 목록에도 키워드 순서대로 들여쓰기해서 보여 줍니다. 줄 오른쪽의 ＋ 버튼을 누르면 그 키워드 아래에 하위 링크를 추가합니다. 런처에서 이름이나 키워드로 찾아 Return을 누르면 링크를 엽니다. 링크에 {query}를 넣으면, 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드가 gh이고 링크가 https://github.com/{query}이면, gh jadewisemann/dynamic-island를 입력해서 그 저장소를 엽니다. 아무것도 입력하지 않고 Return을 누르면 {query} 앞부분(https://github.com/)을 엽니다. g만 입력해도 g로 시작하는 키워드가 위에 힌트로 나오고, gh 다음에 스페이스를 누르면 gh가 검색창 앞에 필로 쌓이고 gh 아래의 링크가 나옵니다. 빈 검색창에서 ⌫를 누르면 한 단계 위로 돌아갑니다. Tab을 누르면 키워드를 다음 단어까지 완성합니다. 링크에는 웹 주소뿐 아니라 obsidian://, mailto: 같은 URL이나 ~/Downloads 같은 파일·폴더 경로도 적을 수 있습니다. ⌘Return은 열지 않고 주소만 복사합니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
