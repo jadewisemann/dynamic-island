@@ -1341,7 +1341,7 @@ private struct QuickLinkSettings: View {
                 }
                 .disabled(editing != nil)
             }
-            Text("런처에서 이름이나 키워드로 찾아 Return을 누르면 링크를 엽니다. 링크에 {query}를 넣으면, 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드가 gh이고 링크가 https://github.com/{query}이면, gh jadewisemann/dynamic-island를 입력해서 그 저장소를 엽니다. 키워드만 입력하고 Return이나 Tab을 눌러도 같은 상태가 됩니다. 링크에는 웹 주소뿐 아니라 obsidian://, mailto: 같은 URL이나 ~/Downloads 같은 파일·폴더 경로도 적을 수 있습니다. ⌘Return은 열지 않고 주소만 복사합니다.")
+            Text("런처에서 이름이나 키워드로 찾아 Return을 누르면 링크를 엽니다. 링크에 {query}를 넣으면, 키워드(없으면 이름) 다음에 스페이스를 누르고 입력한 내용이 그 자리에 들어갑니다. 예를 들어 키워드가 gh이고 링크가 https://github.com/{query}이면, gh jadewisemann/dynamic-island를 입력해서 그 저장소를 엽니다. 아무것도 입력하지 않고 Return을 누르면 {query} 앞부분(https://github.com/)을 엽니다. 키워드는 gh bb stg처럼 여러 단어로 적어 계층을 만들 수 있습니다. g만 입력해도 g로 시작하는 키워드가 위에 힌트로 나오고, gh 다음에 스페이스를 누르면 gh 아래의 링크가 모두 나옵니다. Tab을 누르면 키워드를 다음 단어까지 완성합니다. 링크에는 웹 주소뿐 아니라 obsidian://, mailto: 같은 URL이나 ~/Downloads 같은 파일·폴더 경로도 적을 수 있습니다. ⌘Return은 열지 않고 주소만 복사합니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
@@ -1389,7 +1389,7 @@ private struct QuickLinkSettings: View {
     private var trimmed: QuickLink {
         QuickLink(name: form.name.trimmingCharacters(in: .whitespacesAndNewlines),
                   link: form.link.trimmingCharacters(in: .whitespacesAndNewlines),
-                  keyword: form.keyword.replacingOccurrences(of: " ", with: ""),
+                  keyword: QuickLink.words(form.keyword).text,
                   app: form.app.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
@@ -1403,7 +1403,7 @@ private struct QuickLinkSettings: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("이름", text: $form.name, prompt: Text("GitHub 저장소"))
             TextField("링크", text: $form.link, prompt: Text("https://github.com/{query}"))
-            TextField("키워드", text: $form.keyword, prompt: Text("gh (선택)"))
+            TextField("키워드", text: $form.keyword, prompt: Text("gh 또는 gh bb stg (선택)"))
             TextField("열 앱", text: $form.app, prompt: Text("비워 두면 기본 앱 (Safari, com.google.Chrome)"))
             if let preview {
                 Text(trimmed.needsInput ? "example을 입력하면: \(preview)" : "열 주소: \(preview)")

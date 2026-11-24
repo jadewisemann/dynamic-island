@@ -696,7 +696,8 @@ extension IslandConfig {
                 func text(_ key: String) -> String {
                     (entry[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                let link = QuickLink(name: text("name"), link: text("link"), keyword: text("keyword"), app: text("app"))
+                let link = QuickLink(name: text("name"), link: text("link"),
+                                     keyword: QuickLink.words(text("keyword")).text, app: text("app"))
                 return link.isValid ? link : nil
             }
         }

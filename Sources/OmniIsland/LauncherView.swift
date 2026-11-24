@@ -151,6 +151,18 @@ private struct LauncherRow: View {
                 }
             }
             Spacer(minLength: 8)
+            if let badge = item.badge {
+                badgeText(badge, hits: item.badgeHits, color: secondary,
+                          highlight: selected ? p.activeText : p.accent)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill((selected ? p.activeText : p.fill).opacity(0.14))
+                    )
+            }
             if marked {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 14, weight: .semibold))
@@ -211,6 +223,12 @@ private struct LauncherRow: View {
         Image(systemName: name)
             .font(.system(size: 19, weight: .medium))
             .foregroundStyle(selected ? model.palette.activeText : model.palette.accent)
+    }
+
+    /// A keyword with what was typed of it drawn bold in the accent color.
+    private func badgeText(_ text: String, hits: Int, color: Color, highlight: Color) -> Text {
+        let typed = Text(String(text.prefix(hits))).foregroundColor(highlight).bold()
+        return typed + Text(String(text.dropFirst(hits))).foregroundColor(color)
     }
 
     /// The title with the matched characters drawn bold.
